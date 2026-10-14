@@ -1,0 +1,131 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique
+  email     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  resumes  Resume[]
+  analyses Analysis[]
+}
+
+model Resume {
+  id        String   @id @default(cuid())
+  userId    String
+  fileName  String
+  text      String   @db.Text
+  createdAt DateTime @default(now())
+
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analyses Analysis[]
+
+  @@index([userId, createdAt])
+}
+
+enum AnalysisStatus {
+  QUEUED
+  EXTRACTING
+  COMPARING
+  COMPLETE
+  FAILED
+}
+
+model Analysis {
+  id          String         @id @default(cuid())
+  userId      String
+  resumeId    String
+  jobUrl      String?
+  jobText     String         @db.Text
+  jobTitle    String?
+  company     String?
+  status      AnalysisStatus @default(QUEUED)
+  error       String?
+  createdAt   DateTime       @default(now())
+  completedAt DateTime?
+
+  user   User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resume Resume         @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  items  AnalysisItem[]
+  runs   ProviderRun[]
+
+  @@index([userId, createdAt])
+}
+
+enum ItemCategory {
+  HARD_SKILL
+  TOOL
+  CERTIFICATION
+  EDUCATION
+  EXPERIENCE
+  DOMAIN
+  SOFT_SKILL
+}
+
+enum Importance {
+  REQUIRED
+  PREFERRED
+}
+
+enum MatchStatus {
+  MATCHED
+  PARTIAL
+  MISSING
+}
+
+/// One deduplicated requirement from the job ad. The Keywords view shows all
+/// items; the Gaps view shows PARTIAL and MISSING ones. `key` is the normalized
+/// name, so the unique index guarantees no duplicates per analysis.
+model AnalysisItem {
+  id         String       @id @default(cuid())
+  analysisId String
+  key        String
+  name       String
+  aliases    String[]
+  category   ItemCategory
+  importance Importance
+  detail     String?
+  status     MatchStatus
+  evidence   String?
+  note       String?
+  /// Providers that extracted this requirement from the job ad.
+  foundBy    String[]
+  /// Share of comparing providers whose verdict equals `status` (0–1).
+  agreement  Float
+
+  analysis Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+
+  @@unique([analysisId, key])
+}
+
+enum PipelineStep {
+  EXTRACT
+  COMPARE
+}
+
+/// One AI call, kept for debugging, cost tracking and provider quality comparison.
+model ProviderRun {
+  id           String       @id @default(cuid())
+  analysisId   String
+  provider     String
+  model        String
+  step         PipelineStep
+  ok           Boolean
+  latencyMs    Int
+  inputTokens  Int?
+  outputTokens Int?
+  error        String?
+  createdAt    DateTime     @default(now())
+
+  analysis Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+
+  @@index([analysisId])
+}
