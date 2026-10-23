@@ -2,6 +2,7 @@ import { generateText, Output } from "ai";
 import type { z } from "zod";
 import type { ItemCategory, PipelineStep } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
+import { resumeForAnalysis } from "@/lib/resume/skills";
 import { mergeRequirements, resolveStatuses } from "./merge";
 import { COMPARE_SYSTEM, comparePrompt, EXTRACT_SYSTEM, extractPrompt } from "./prompts";
 import { getProviders, type Provider } from "./providers";
@@ -47,8 +48,9 @@ export async function runAnalysis(analysisId: string) {
       where: { id: analysisId },
       data: {
         status: "COMPARING",
-        jobTitle: firstValue(extractions.map((e) => e.output.jobTitle)),
-        company: firstValue(extractions.map((e) => e.output.company)),
+        // Titles and companies entered by the user (or from the job board) win over extracted ones.
+        jobTitle: analysis.jobTitle ?? firstValue(extractions.map((e) => e.output.jobTitle)),
+        company: analysis.company ?? firstValue(extractions.map((e) => e.output.company)),
       },
     });
 
@@ -59,7 +61,7 @@ export async function runAnalysis(analysisId: string) {
         "COMPARE",
         comparisonSchema,
         COMPARE_SYSTEM,
-        comparePrompt(analysis.resume.text, requirements),
+        comparePrompt(resumeForAnalysis(analysis.resume), requirements),
       ),
     );
     if (comparisons.length === 0) throw new Error("All AI providers failed to compare the resume.");

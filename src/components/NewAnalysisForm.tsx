@@ -2,11 +2,13 @@
 
 import { useActionState } from "react";
 import { createAnalysis, type FormState } from "@/app/actions";
+import { resumeLabel } from "@/lib/resume/label";
 import { card, input, primaryButton } from "./ui";
 
 interface SavedResume {
   id: string;
   fileName: string;
+  label: string | null;
   createdAt: Date;
 }
 
@@ -23,7 +25,7 @@ export function NewAnalysisForm({ resumes }: { resumes: SavedResume[] }) {
             <select name="resumeId" defaultValue={resumes[0].id} className={`${input} mt-1`}>
               {resumes.map((r) => (
                 <option key={r.id} value={r.id}>
-                  {r.fileName} · {r.createdAt.toLocaleDateString()}
+                  {resumeLabel(r)} · {r.createdAt.toLocaleDateString()}
                 </option>
               ))}
             </select>

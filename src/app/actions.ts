@@ -4,26 +4,18 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { redirect } from "next/navigation";
 import { runAnalysis } from "@/lib/analysis/pipeline";
+import { startAnalysis } from "@/lib/analysis/start";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { UserInputError } from "@/lib/errors";
 import { fetchJobAd } from "@/lib/ingest/job-url";
 import { resumeToText } from "@/lib/ingest/resume";
-
-// Each analysis makes several paid AI calls, so cap usage per user.
-const DAILY_ANALYSIS_LIMIT = 25;
-const MAX_JOB_CHARS = 30_000;
+import { parseSkillsFromText } from "@/lib/resume/skills";
 
 export type FormState = { error: string | null };
 
 export async function createAnalysis(_prev: FormState, formData: FormData): Promise<FormState> {
   const user = await requireUser();
-
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const recent = await db.analysis.count({ where: { userId: user.id, createdAt: { gte: since } } });
-  if (recent >= DAILY_ANALYSIS_LIMIT) {
-    return { error: `You've reached the limit of ${DAILY_ANALYSIS_LIMIT} analyses per day. Try again tomorrow.` };
-  }
 
   const file = formData.get("resume");
   const savedResumeId = String(formData.get("resumeId") ?? "");
@@ -40,7 +32,11 @@ export async function createAnalysis(_prev: FormState, formData: FormData): Prom
     let resumeId: string;
     if (file instanceof File && file.size > 0) {
       const text = await resumeToText(file);
-      resumeId = (await db.resume.create({ data: { userId: user.id, fileName: file.name, text } })).id;
+      resumeId = (
+        await db.resume.create({
+          data: { userId: user.id, fileName: file.name, text, skills: parseSkillsFromText(text) },
+        })
+      ).id;
     } else if (savedResumeId) {
       const saved = await db.resume.findFirst({ where: { id: savedResumeId, userId: user.id }, select: { id: true } });
       if (!saved) return { error: "That saved resume no longer exists. Upload it again." };
@@ -55,24 +51,19 @@ export async function createAnalysis(_prev: FormState, formData: FormData): Prom
       ({ text: jobText, title: jobTitle, company } = ad);
     }
 
-    const analysis = await db.analysis.create({
-      data: { userId: user.id, resumeId, jobUrl, jobText: jobText.slice(0, MAX_JOB_CHARS), jobTitle, company },
-    });
-    analysisId = analysis.id;
+    analysisId = await startAnalysis({ userId: user.id, resumeId, jobUrl, jobText, jobTitle, company });
   } catch (error) {
     if (error instanceof UserInputError) return { error: error.message };
     throw error;
   }
 
-  // Runs after the response is sent; the results page polls until it finishes.
-  after(() => runAnalysis(analysisId));
   redirect(`/analyses/${analysisId}`);
 }
 
 export async function retryAnalysis(analysisId: string) {
   const user = await requireUser();
   const { count } = await db.analysis.updateMany({
-    // Re-running a finished analysis is useful after prompt or model changes.
+    // Re-running a finished analysis is useful after prompt, model or resume changes.
     where: { id: analysisId, userId: user.id, status: { in: ["FAILED", "COMPLETE"] } },
     data: { status: "QUEUED", error: null },
   });
@@ -87,4 +78,32 @@ export async function deleteAnalysis(analysisId: string) {
   await db.analysis.deleteMany({ where: { id: analysisId, userId: user.id } });
   revalidatePath("/analyses");
   redirect("/analyses");
+}
+
+/** Saves the job from a quick analysis to the tracker and links them. */
+export async function saveAnalysisAsJob(analysisId: string) {
+  const user = await requireUser();
+  const analysis = await db.analysis.findFirst({ where: { id: analysisId, userId: user.id } });
+  if (!analysis) return;
+  if (analysis.jobId) redirect(`/jobs/${analysis.jobId}`);
+
+  const first = await db.job.findFirst({
+    where: { userId: user.id, stage: "SAVED" },
+    orderBy: { position: "asc" },
+    select: { position: true },
+  });
+  const job = await db.job.create({
+    data: {
+      userId: user.id,
+      title: analysis.jobTitle ?? "Untitled role",
+      company: analysis.company,
+      url: analysis.jobUrl,
+      description: analysis.jobText,
+      resumeId: analysis.resumeId,
+      position: (first?.position ?? 1024) - 1024,
+      events: { create: { to: "SAVED" } },
+    },
+  });
+  await db.analysis.update({ where: { id: analysis.id }, data: { jobId: job.id } });
+  redirect(`/jobs/${job.id}`);
 }

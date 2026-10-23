@@ -1,15 +1,19 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
-import { deleteAnalysis, retryAnalysis } from "@/app/actions";
+import { ArrowLeft, KanbanSquare, Plus, Trash2 } from "lucide-react";
+import { deleteAnalysis, retryAnalysis, saveAnalysisAsJob } from "@/app/actions";
+import { AddSkillButton, KeywordChip } from "@/components/AddSkillButton";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { CopyButton } from "@/components/CopyButton";
-import { card, CATEGORY_LABELS, primaryButton, secondaryButton, STATUS_LABELS, STATUS_STYLES } from "@/components/ui";
+import { card, CATEGORY_LABELS, deleteIconButton, primaryButton, secondaryButton, STATUS_LABELS, STATUS_STYLES } from "@/components/ui";
 import type { AnalysisItem } from "@/generated/prisma/client";
 import { PROVIDER_LABELS, type ProviderId } from "@/lib/analysis/providers";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { resumeLabel } from "@/lib/resume/label";
+import { hasSkill } from "@/lib/resume/skills";
 
 const STEPS = [
   { status: "EXTRACTING", label: "Reading the job ad" },
@@ -26,21 +30,32 @@ export default async function AnalysisPage({ params, searchParams }: PageProps<"
     include: {
       items: true,
       runs: { orderBy: { createdAt: "asc" } },
-      resume: { select: { fileName: true } },
+      resume: { select: { id: true, fileName: true, label: true, skills: true } },
+      job: { select: { id: true, title: true } },
     },
   });
   if (!analysis) notFound();
 
   const running = analysis.status !== "COMPLETE" && analysis.status !== "FAILED";
   const showKeywords = view === "keywords";
+  const skillTarget = {
+    resumeId: analysis.resume.id,
+    label: resumeLabel(analysis.resume),
+    has: (item: AnalysisItem) => [item.name, ...item.aliases].some((n) => hasSkill(analysis.resume.skills, n)),
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
+    <div className="mx-auto max-w-4xl space-y-6">
+      {analysis.job && (
+        <Link href={`/jobs/${analysis.job.id}`} className="inline-flex items-center gap-1 text-sm text-neutral-500 hover:text-neutral-900 dark:hover:text-white">
+          <ArrowLeft className="size-4" aria-hidden /> {analysis.job.title}
+        </Link>
+      )}
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">{analysis.jobTitle ?? "Job analysis"}</h1>
           <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-            {[analysis.company, analysis.resume.fileName, analysis.createdAt.toLocaleString()].filter(Boolean).join(" · ")}
+            {[analysis.company, resumeLabel(analysis.resume), analysis.createdAt.toLocaleString()].filter(Boolean).join(" · ")}
             {analysis.jobUrl && (
               <>
                 {" · "}
@@ -52,16 +67,29 @@ export default async function AnalysisPage({ params, searchParams }: PageProps<"
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
+          {!analysis.job && (
+            <form action={saveAnalysisAsJob.bind(null, analysis.id)}>
+              <button className={`${secondaryButton} flex items-center gap-1.5`}>
+                <KanbanSquare className="size-3.5" aria-hidden /> Save to job board
+              </button>
+            </form>
+          )}
           {analysis.status === "COMPLETE" && (
             <form action={retryAnalysis.bind(null, analysis.id)}>
-              <ConfirmButton message="Re-run this analysis? It replaces the current results." className={secondaryButton}>
+              <ConfirmButton message="Re-run this analysis?" confirmLabel="Re-run" destructive={false} className={secondaryButton}>
                 Re-run
               </ConfirmButton>
             </form>
           )}
           <form action={deleteAnalysis.bind(null, analysis.id)}>
-            <ConfirmButton message="Delete this analysis?" className={secondaryButton}>
-              Delete
+            <ConfirmButton
+              message="Delete this analysis?"
+              confirmLabel="Delete analysis"
+              aria-label="Delete analysis"
+              title="Delete analysis"
+              className={`${deleteIconButton} h-full`}
+            >
+              <Trash2 className="size-4" aria-hidden />
             </ConfirmButton>
           </form>
         </div>
@@ -105,7 +133,11 @@ export default async function AnalysisPage({ params, searchParams }: PageProps<"
               All keywords ({analysis.items.length})
             </Tab>
           </div>
-          {showKeywords ? <Keywords items={analysis.items} /> : <Gaps items={analysis.items} />}
+          {showKeywords ? (
+            <Keywords items={analysis.items} skillTarget={skillTarget} />
+          ) : (
+            <Gaps items={analysis.items} skillTarget={skillTarget} />
+          )}
         </>
       )}
 
@@ -146,7 +178,17 @@ function Summary({ items }: { items: AnalysisItem[] }) {
   );
 }
 
-function Gaps({ items }: { items: AnalysisItem[] }) {
+interface SkillTarget {
+  resumeId: string;
+  label: string;
+  has: (item: AnalysisItem) => boolean;
+}
+
+// Categories that belong in a skills section; degrees, years of experience and
+// certifications you don't hold can't be added honestly.
+const ADDABLE = new Set<AnalysisItem["category"]>(["HARD_SKILL", "TOOL", "DOMAIN", "SOFT_SKILL"]);
+
+function Gaps({ items, skillTarget }: { items: AnalysisItem[]; skillTarget: SkillTarget }) {
   const gaps = items
     .filter((i) => i.status !== "MATCHED")
     .sort(
@@ -170,6 +212,11 @@ function Gaps({ items }: { items: AnalysisItem[] }) {
               {item.importance === "REQUIRED" ? "Required" : "Preferred"} · {CATEGORY_LABELS[item.category]}
               {item.detail && ` · ${item.detail}`}
             </span>
+            {ADDABLE.has(item.category) && (
+              <span className="ml-auto">
+                <AddSkillButton resumeId={skillTarget.resumeId} name={item.name} inSkills={skillTarget.has(item)} />
+              </span>
+            )}
           </div>
           {item.note && <p className="mt-2 text-sm text-neutral-700 dark:text-neutral-300">{item.note}</p>}
           {item.evidence && (
@@ -184,7 +231,7 @@ function Gaps({ items }: { items: AnalysisItem[] }) {
   );
 }
 
-function Keywords({ items }: { items: AnalysisItem[] }) {
+function Keywords({ items, skillTarget }: { items: AnalysisItem[]; skillTarget: SkillTarget }) {
   const byCategory = Object.entries(CATEGORY_LABELS)
     .map(([category, label]) => ({ label, items: items.filter((i) => i.category === category) }))
     .filter((g) => g.items.length > 0);
@@ -199,19 +246,29 @@ function Keywords({ items }: { items: AnalysisItem[] }) {
         </div>
         <CopyButton text={items.map((i) => i.name).join(", ")} label="Copy all keywords" />
       </div>
+      <p className="text-sm text-neutral-600 dark:text-neutral-400">
+        Click <Plus className="inline size-3.5 align-[-2px]" aria-label="plus" /> on a keyword to add it to the skills
+        section of{" "}
+        <Link href={`/resumes/${skillTarget.resumeId}`} className="font-medium underline underline-offset-2">
+          {skillTarget.label}
+        </Link>
+        . Only add skills you actually have.
+      </p>
       {byCategory.map((group) => (
         <section key={group.label}>
           <h3 className="mb-2 text-sm font-medium text-neutral-600 dark:text-neutral-400">{group.label}</h3>
           <ul className="flex flex-wrap gap-2">
             {group.items.map((item) => (
-              <li
+              <KeywordChip
                 key={item.id}
+                resumeId={skillTarget.resumeId}
+                name={item.name}
+                status={item.status}
+                preferred={item.importance === "PREFERRED"}
                 title={item.evidence ?? item.note ?? undefined}
-                className={`rounded-full px-3 py-1 text-sm ring-1 ring-inset ${STATUS_STYLES[item.status]}`}
-              >
-                {item.name}
-                {item.importance === "PREFERRED" && <span className="opacity-60"> · preferred</span>}
-              </li>
+                addable={ADDABLE.has(item.category)}
+                inSkills={skillTarget.has(item)}
+              />
             ))}
           </ul>
         </section>

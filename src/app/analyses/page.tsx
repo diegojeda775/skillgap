@@ -23,7 +23,7 @@ export default async function HistoryPage() {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-4xl space-y-6">
       <h1 className="text-2xl font-semibold tracking-tight">History</h1>
       {analyses.length === 0 ? (
         <p className="text-sm text-neutral-600 dark:text-neutral-400">

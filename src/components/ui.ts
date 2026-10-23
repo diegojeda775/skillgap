@@ -5,6 +5,8 @@ export const primaryButton =
   "rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-700 disabled:opacity-50 dark:bg-white dark:text-neutral-900 dark:hover:bg-neutral-200";
 export const secondaryButton =
   "rounded-md border border-neutral-300 px-3 py-1.5 text-sm hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800";
+/** Trash-icon delete button; pair with an aria-label. */
+export const deleteIconButton = `${secondaryButton} flex items-center justify-center text-rose-600 dark:text-rose-400`;
 
 export const STATUS_STYLES = {
   MATCHED: "bg-emerald-50 text-emerald-800 ring-emerald-200 dark:bg-emerald-950 dark:text-emerald-300 dark:ring-emerald-900",

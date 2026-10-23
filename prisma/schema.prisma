@@ -16,17 +16,24 @@ model User {
 
   resumes  Resume[]
   analyses Analysis[]
+  jobs     Job[]
 }
 
+/// One resume version, e.g. "Frontend" or "IT Support". `skills` is the editable
+/// skills section; keywords from an analysis can be added to it.
 model Resume {
   id        String   @id @default(cuid())
   userId    String
+  label     String?
   fileName  String
   text      String   @db.Text
+  skills    String[] @default([])
   createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
 
   user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   analyses Analysis[]
+  jobs     Job[]
 
   @@index([userId, createdAt])
 }
@@ -43,6 +50,7 @@ model Analysis {
   id          String         @id @default(cuid())
   userId      String
   resumeId    String
+  jobId       String?
   jobUrl      String?
   jobText     String         @db.Text
   jobTitle    String?
@@ -54,10 +62,12 @@ model Analysis {
 
   user   User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   resume Resume         @relation(fields: [resumeId], references: [id], onDelete: Cascade)
+  job    Job?           @relation(fields: [jobId], references: [id], onDelete: SetNull)
   items  AnalysisItem[]
   runs   ProviderRun[]
 
   @@index([userId, createdAt])
+  @@index([jobId])
 }
 
 enum ItemCategory {
@@ -128,4 +138,66 @@ model ProviderRun {
   analysis Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
 
   @@index([analysisId])
+}
+
+// --- Job tracker ---
+
+enum JobStage {
+  SAVED
+  OUTREACH
+  APPLIED
+  INTERVIEWING
+  OFFER
+  CLOSED
+}
+
+enum JobOutcome {
+  ACCEPTED
+  REJECTED
+  WITHDREW
+  NO_RESPONSE
+}
+
+model Job {
+  id             String      @id @default(cuid())
+  userId         String
+  title          String
+  company        String?
+  location       String?
+  salary         String?
+  url            String?
+  description    String      @db.Text
+  notes          String      @default("") @db.Text
+  stage          JobStage    @default(SAVED)
+  /// Sort order within a board column; new positions are midpoints between neighbors.
+  position       Float       @default(0)
+  outcome        JobOutcome?
+  /// The resume version used (or planned) for this application.
+  resumeId       String?
+  nextAction     String?
+  nextActionAt   DateTime?
+  appliedAt      DateTime?
+  stageChangedAt DateTime    @default(now())
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resume   Resume?    @relation(fields: [resumeId], references: [id], onDelete: SetNull)
+  analyses Analysis[]
+  events   JobEvent[]
+
+  @@index([userId, stage, position])
+}
+
+/// Stage history, used for the timeline and conversion stats.
+model JobEvent {
+  id        String    @id @default(cuid())
+  jobId     String
+  from      JobStage?
+  to        JobStage
+  createdAt DateTime  @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
 }

@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
+import { NavLinks } from "@/components/NavLinks";
 import "./globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -19,22 +20,13 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <ClerkProvider>
       <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-        <body className="flex min-h-full flex-col font-sans">
+        <body className="flex min-h-full flex-col overflow-x-clip font-sans">
           <header className="border-b border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
-            <nav className="mx-auto flex h-14 max-w-4xl items-center gap-6 px-4">
-              <Link href="/" className="font-semibold tracking-tight">
+            <nav className="mx-auto flex h-14 max-w-7xl items-center gap-4 px-4">
+              <Link href="/" className="shrink-0 font-semibold tracking-tight">
                 SkillGap
               </Link>
-              {userId && (
-                <>
-                  <Link href="/" className="text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white">
-                    New analysis
-                  </Link>
-                  <Link href="/analyses" className="text-sm text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white">
-                    History
-                  </Link>
-                </>
-              )}
+              {userId && <NavLinks />}
               <div className="ml-auto">
                 {userId ? (
                   <UserButton />
@@ -48,7 +40,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
               </div>
             </nav>
           </header>
-          <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-8">{children}</main>
+          <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-8">{children}</main>
         </body>
       </html>
     </ClerkProvider>
