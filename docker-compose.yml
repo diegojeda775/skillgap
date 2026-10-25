@@ -11,5 +11,15 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+  # Converts resumes from Word to PDF with LibreOffice, keeping their layout.
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3100:3000"
+    volumes:
+      # Extra fonts for resumes that use fonts the converter doesn't ship (see fonts/README.md).
+      - ./fonts:/usr/local/share/fonts/custom:ro
+
 volumes:
   pgdata:

@@ -1,11 +1,12 @@
-import { ArrowLeft, CheckCircle2, Copy, Download, Trash2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Copy, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { deleteResume, duplicateResume, saveSkillsSection } from "@/app/resumes/actions";
 import { ConfirmButton } from "@/components/ConfirmButton";
+import { DownloadMenu } from "@/components/resumes/DownloadMenu";
 import { RenameResumeForm, ReplaceFileForm } from "@/components/resumes/ResumeForms";
 import { SkillsSectionEditor } from "@/components/resumes/SkillsSectionEditor";
-import { card, deleteIconButton, primaryButton, secondaryButton } from "@/components/ui";
+import { card, deleteIconButton, secondaryButton } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { DOCX_MIME } from "@/lib/ingest/resume";
@@ -47,7 +48,7 @@ export default async function ResumePage({ params, searchParams }: PageProps<"/r
       {created && (
         <p className="flex items-center gap-2 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
           <CheckCircle2 className="size-4 shrink-0" aria-hidden />
-          New version created with your original formatting. Download it to send with your application.
+          New version created with your original formatting. Download it as PDF or Word to send with your application.
         </p>
       )}
 
@@ -59,11 +60,7 @@ export default async function ResumePage({ params, searchParams }: PageProps<"/r
           </p>
         </div>
         <div className="flex gap-2">
-          {resume.file && (
-            <a href={`/resumes/${resume.id}/download`} className={`${primaryButton} flex items-center gap-1.5`}>
-              <Download className="size-4" aria-hidden /> Download
-            </a>
-          )}
+          {resume.file && <DownloadMenu resumeId={resume.id} isDocx={isDocx} />}
           <form action={duplicateResume.bind(null, resume.id)}>
             <button className={`${secondaryButton} flex h-full items-center gap-1.5`}>
               <Copy className="size-3.5" aria-hidden /> Duplicate
