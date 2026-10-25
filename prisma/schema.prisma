@@ -28,6 +28,9 @@ model Resume {
   fileName  String
   text      String   @db.Text
   skills    String[] @default([])
+  /// The uploaded file. DOCX files are edited in place so their formatting is kept.
+  file      Bytes?
+  mimeType  String?
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 

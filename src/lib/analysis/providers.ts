@@ -2,8 +2,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import type { LanguageModel } from "ai";
-
-export type ProviderId = "claude" | "openai" | "gemini";
+import { PROVIDER_LABELS, type ProviderId } from "./provider-labels";
 
 export interface Provider {
   id: ProviderId;
@@ -11,12 +10,6 @@ export interface Provider {
   modelId: string;
   model: LanguageModel;
 }
-
-export const PROVIDER_LABELS: Record<ProviderId, string> = {
-  claude: "Claude",
-  openai: "OpenAI",
-  gemini: "Gemini",
-};
 
 /** Every provider with an API key set. Order matters: it breaks ties when merging. */
 export function getProviders(): Provider[] {

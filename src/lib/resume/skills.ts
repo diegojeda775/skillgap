@@ -1,10 +1,10 @@
 import { normalizeKey } from "@/lib/analysis/merge";
 
-const SKILLS_HEADING =
+export const SKILLS_HEADING =
   /^(?:technical skills|core skills|key skills|skills(?: (?:and|&) (?:tools|technologies|abilities))?|core competencies|competencies|technologies|tech stack|tools(?: and technologies)?)\b\s*[:\-–]?\s*(.*)$/i;
 
-const OTHER_HEADING =
-  /^(?:experience|work experience|professional experience|employment|work history|education|projects|certifications?|licenses|summary|profile|objective|awards|honors|publications|volunteer(?:ing)?|interests|references|languages|activities)\b/i;
+export const OTHER_HEADING =
+  /^(?:experience|work experience|professional experience|employment|work history|education|projects|certifications?|licenses|summary|profile|objective|awards|honors|publications|volunteer(?:ing)?|interests|references|languages|activities|achievements|accomplishments|training|courses|coursework|affiliations|memberships|hobbies)\b/i;
 
 const MAX_SKILL_CHARS = 40;
 
@@ -34,8 +34,10 @@ export function parseSkillsFromText(text: string): string[] {
   );
 }
 
-function isHeadingLike(line: string) {
-  return line.length > 2 && line.length < 40 && line === line.toUpperCase() && /[A-Z]/.test(line) && !line.includes(",");
+export function isHeadingLike(line: string) {
+  // Multi-word all caps ("WORK EXPERIENCE"). Single all-caps words are often skills (AWS, SQL, MATLAB);
+  // single-word headings are covered by OTHER_HEADING.
+  return line.length > 2 && line.length < 40 && line.includes(" ") && line === line.toUpperCase() && /[A-Z]/.test(line) && !line.includes(",");
 }
 
 /** Keeps the first spelling of each skill ("React" and "React.js" count as one). */
@@ -58,4 +60,54 @@ export function hasSkill(skills: string[], name: string) {
 export function resumeForAnalysis(resume: { text: string; skills: string[] }) {
   if (resume.skills.length === 0) return resume.text;
   return `${resume.text}\n\nSkills: ${resume.skills.join(", ")}`;
+}
+
+const SOFT_LINE_LABEL = /soft|interpersonal|personal|people|customer|professional/i;
+
+/**
+ * Adds keywords to a skills section's lines, where they most likely belong:
+ * - a list with one skill per line gets one new line per keyword;
+ * - otherwise soft skills go to a "Soft skills:"-style line and the rest to the line with the most items.
+ * Returns the new lines and the indexes that changed.
+ */
+export function addSkillsToLines(
+  paragraphs: string[],
+  keywords: { name: string; soft: boolean }[],
+): { lines: string[]; changed: number[] } {
+  if (keywords.length === 0) return { lines: paragraphs, changed: [] };
+  if (paragraphs.length === 0) return { lines: [`Skills: ${keywords.map((k) => k.name).join(", ")}`], changed: [0] };
+
+  // Work on visual lines: a paragraph may hold several lines separated by line breaks.
+  const visual = paragraphs.flatMap((text, p) => text.split("\n").map((line) => ({ p, line })));
+  const lines = visual.map((v) => v.line);
+
+  const oneSkillPerLine = lines.length >= 3 && lines.filter((l) => !l.includes(",")).length >= lines.length * 0.6;
+  if (oneSkillPerLine) {
+    return {
+      lines: [...paragraphs, ...keywords.map((k) => k.name)],
+      changed: keywords.map((_, i) => paragraphs.length + i),
+    };
+  }
+
+  const label = (l: string) => l.split(":")[0] ?? "";
+  const softIndex = lines.findIndex((l) => l.includes(":") && SOFT_LINE_LABEL.test(label(l)));
+  const mainIndex = lines
+    .map((l, i) => ({ i, n: i === softIndex ? -1 : l.split(",").length }))
+    .reduce((best, cur) => (cur.n > best.n ? cur : best)).i;
+
+  const changed = new Set<number>();
+  for (const k of keywords) {
+    const i = k.soft && softIndex !== -1 ? softIndex : mainIndex;
+    lines[i] = appendItem(lines[i], k.name);
+    changed.add(visual[i].p);
+  }
+
+  const next = paragraphs.map((_, p) => visual.filter((v) => v.p === p).map((v) => lines[visual.indexOf(v)]).join("\n"));
+  return { lines: next, changed: [...changed] };
+}
+
+function appendItem(line: string, item: string) {
+  const trimmed = line.replace(/\s+$/, "");
+  const separator = /[,:;]$/.test(trimmed) ? " " : ", ";
+  return trimmed + separator + item;
 }

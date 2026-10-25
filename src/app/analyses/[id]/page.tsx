@@ -1,15 +1,13 @@
+import { ArrowLeft, KanbanSquare, Trash2 } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
 import { notFound } from "next/navigation";
-import { ArrowLeft, KanbanSquare, Plus, Trash2 } from "lucide-react";
 import { deleteAnalysis, retryAnalysis, saveAnalysisAsJob } from "@/app/actions";
-import { AddSkillButton, KeywordChip } from "@/components/AddSkillButton";
+import { AnalysisResults } from "@/components/analysis/AnalysisResults";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { ConfirmButton } from "@/components/ConfirmButton";
-import { CopyButton } from "@/components/CopyButton";
-import { card, CATEGORY_LABELS, deleteIconButton, primaryButton, secondaryButton, STATUS_LABELS, STATUS_STYLES } from "@/components/ui";
+import { card, deleteIconButton, primaryButton, secondaryButton, STATUS_LABELS } from "@/components/ui";
 import type { AnalysisItem } from "@/generated/prisma/client";
-import { PROVIDER_LABELS, type ProviderId } from "@/lib/analysis/providers";
+import { providerLabel } from "@/lib/analysis/provider-labels";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { resumeLabel } from "@/lib/resume/label";
@@ -37,12 +35,7 @@ export default async function AnalysisPage({ params, searchParams }: PageProps<"
   if (!analysis) notFound();
 
   const running = analysis.status !== "COMPLETE" && analysis.status !== "FAILED";
-  const showKeywords = view === "keywords";
-  const skillTarget = {
-    resumeId: analysis.resume.id,
-    label: resumeLabel(analysis.resume),
-    has: (item: AnalysisItem) => [item.name, ...item.aliases].some((n) => hasSkill(analysis.resume.skills, n)),
-  };
+  const resumeSkills = analysis.resume.skills;
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
@@ -125,19 +118,24 @@ export default async function AnalysisPage({ params, searchParams }: PageProps<"
       {analysis.status === "COMPLETE" && (
         <>
           <Summary items={analysis.items} />
-          <div className="flex gap-1 border-b border-neutral-200 dark:border-neutral-800">
-            <Tab href={`/analyses/${id}`} active={!showKeywords}>
-              Skill gaps ({analysis.items.filter((i) => i.status !== "MATCHED").length})
-            </Tab>
-            <Tab href={`/analyses/${id}?view=keywords`} active={showKeywords}>
-              All keywords ({analysis.items.length})
-            </Tab>
-          </div>
-          {showKeywords ? (
-            <Keywords items={analysis.items} skillTarget={skillTarget} />
-          ) : (
-            <Gaps items={analysis.items} skillTarget={skillTarget} />
-          )}
+          <AnalysisResults
+            analysisId={analysis.id}
+            initialView={view === "keywords" ? "keywords" : "gaps"}
+            resume={{ id: analysis.resume.id, label: resumeLabel(analysis.resume) }}
+            items={analysis.items.map((item) => ({
+              id: item.id,
+              name: item.name,
+              category: item.category,
+              importance: item.importance,
+              detail: item.detail,
+              status: item.status,
+              evidence: item.evidence,
+              note: item.note,
+              foundBy: item.foundBy,
+              agreement: item.agreement,
+              inResume: [item.name, ...item.aliases].some((n) => hasSkill(resumeSkills, n)),
+            }))}
+          />
         </>
       )}
 
@@ -147,7 +145,7 @@ export default async function AnalysisPage({ params, searchParams }: PageProps<"
           <ul className="mt-2 space-y-1 font-mono">
             {analysis.runs.map((run) => (
               <li key={run.id}>
-                {run.ok ? "✓" : "✗"} {PROVIDER_LABELS[run.provider as ProviderId] ?? run.provider} ({run.model}) ·{" "}
+                {run.ok ? "✓" : "✗"} {providerLabel(run.provider)} ({run.model}) ·{" "}
                 {run.step.toLowerCase()} · {(run.latencyMs / 1000).toFixed(1)}s
                 {run.error && <span className="text-rose-600"> · {run.error}</span>}
               </li>
@@ -175,133 +173,5 @@ function Summary({ items }: { items: AnalysisItem[] }) {
         </div>
       ))}
     </div>
-  );
-}
-
-interface SkillTarget {
-  resumeId: string;
-  label: string;
-  has: (item: AnalysisItem) => boolean;
-}
-
-// Categories that belong in a skills section; degrees, years of experience and
-// certifications you don't hold can't be added honestly.
-const ADDABLE = new Set<AnalysisItem["category"]>(["HARD_SKILL", "TOOL", "DOMAIN", "SOFT_SKILL"]);
-
-function Gaps({ items, skillTarget }: { items: AnalysisItem[]; skillTarget: SkillTarget }) {
-  const gaps = items
-    .filter((i) => i.status !== "MATCHED")
-    .sort(
-      (a, b) =>
-        Number(b.importance === "REQUIRED") - Number(a.importance === "REQUIRED") ||
-        Number(b.status === "MISSING") - Number(a.status === "MISSING"),
-    );
-
-  if (gaps.length === 0) {
-    return <p className="text-sm text-neutral-600 dark:text-neutral-400">No gaps found. Your resume covers everything the ad asks for.</p>;
-  }
-
-  return (
-    <ul className="space-y-3">
-      {gaps.map((item) => (
-        <li key={item.id} className={card}>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium">{item.name}</span>
-            <Badge status={item.status} />
-            <span className="text-xs text-neutral-500">
-              {item.importance === "REQUIRED" ? "Required" : "Preferred"} · {CATEGORY_LABELS[item.category]}
-              {item.detail && ` · ${item.detail}`}
-            </span>
-            {ADDABLE.has(item.category) && (
-              <span className="ml-auto">
-                <AddSkillButton resumeId={skillTarget.resumeId} name={item.name} inSkills={skillTarget.has(item)} />
-              </span>
-            )}
-          </div>
-          {item.note && <p className="mt-2 text-sm text-neutral-700 dark:text-neutral-300">{item.note}</p>}
-          {item.evidence && (
-            <p className="mt-2 border-l-2 border-neutral-300 pl-3 text-sm italic text-neutral-600 dark:border-neutral-700 dark:text-neutral-400">
-              “{item.evidence}”
-            </p>
-          )}
-          <Agreement item={item} />
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function Keywords({ items, skillTarget }: { items: AnalysisItem[]; skillTarget: SkillTarget }) {
-  const byCategory = Object.entries(CATEGORY_LABELS)
-    .map(([category, label]) => ({ label, items: items.filter((i) => i.category === category) }))
-    .filter((g) => g.items.length > 0);
-
-  return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex gap-3 text-xs">
-          {(["MATCHED", "PARTIAL", "MISSING"] as const).map((s) => (
-            <Badge key={s} status={s} />
-          ))}
-        </div>
-        <CopyButton text={items.map((i) => i.name).join(", ")} label="Copy all keywords" />
-      </div>
-      <p className="text-sm text-neutral-600 dark:text-neutral-400">
-        Click <Plus className="inline size-3.5 align-[-2px]" aria-label="plus" /> on a keyword to add it to the skills
-        section of{" "}
-        <Link href={`/resumes/${skillTarget.resumeId}`} className="font-medium underline underline-offset-2">
-          {skillTarget.label}
-        </Link>
-        . Only add skills you actually have.
-      </p>
-      {byCategory.map((group) => (
-        <section key={group.label}>
-          <h3 className="mb-2 text-sm font-medium text-neutral-600 dark:text-neutral-400">{group.label}</h3>
-          <ul className="flex flex-wrap gap-2">
-            {group.items.map((item) => (
-              <KeywordChip
-                key={item.id}
-                resumeId={skillTarget.resumeId}
-                name={item.name}
-                status={item.status}
-                preferred={item.importance === "PREFERRED"}
-                title={item.evidence ?? item.note ?? undefined}
-                addable={ADDABLE.has(item.category)}
-                inSkills={skillTarget.has(item)}
-              />
-            ))}
-          </ul>
-        </section>
-      ))}
-    </div>
-  );
-}
-
-function Badge({ status }: { status: AnalysisItem["status"] }) {
-  return (
-    <span className={`rounded-full px-2 py-0.5 text-xs ring-1 ring-inset ${STATUS_STYLES[status]}`}>{STATUS_LABELS[status]}</span>
-  );
-}
-
-function Agreement({ item }: { item: AnalysisItem }) {
-  const names = item.foundBy.map((p) => PROVIDER_LABELS[p as ProviderId] ?? p).join(", ");
-  return (
-    <p className="mt-2 text-xs text-neutral-400">
-      Found by {names}
-      {item.agreement < 1 && ` · models agreed ${Math.round(item.agreement * 100)}% on the verdict`}
-    </p>
-  );
-}
-
-function Tab({ href, active, children }: { href: string; active: boolean; children: ReactNode }) {
-  return (
-    <Link
-      href={href}
-      className={`-mb-px border-b-2 px-3 py-2 text-sm ${
-        active ? "border-neutral-900 font-medium dark:border-white" : "border-transparent text-neutral-500 hover:text-neutral-900 dark:hover:text-white"
-      }`}
-    >
-      {children}
-    </Link>
   );
 }

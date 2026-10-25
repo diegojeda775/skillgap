@@ -9,7 +9,7 @@ import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { UserInputError } from "@/lib/errors";
 import { fetchJobAd } from "@/lib/ingest/job-url";
-import { resumeToText } from "@/lib/ingest/resume";
+import { readResumeFile } from "@/lib/ingest/resume";
 import { parseSkillsFromText } from "@/lib/resume/skills";
 
 export type FormState = { error: string | null };
@@ -31,10 +31,17 @@ export async function createAnalysis(_prev: FormState, formData: FormData): Prom
   try {
     let resumeId: string;
     if (file instanceof File && file.size > 0) {
-      const text = await resumeToText(file);
+      const { text, buffer, mimeType } = await readResumeFile(file);
       resumeId = (
         await db.resume.create({
-          data: { userId: user.id, fileName: file.name, text, skills: parseSkillsFromText(text) },
+          data: {
+            userId: user.id,
+            fileName: file.name,
+            text,
+            skills: parseSkillsFromText(text),
+            file: new Uint8Array(buffer),
+            mimeType,
+          },
         })
       ).id;
     } else if (savedResumeId) {
