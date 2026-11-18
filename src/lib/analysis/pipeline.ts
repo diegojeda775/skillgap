@@ -3,7 +3,7 @@ import type { z } from "zod";
 import type { ItemCategory, PipelineStep } from "@/generated/prisma/client";
 import { db } from "@/lib/db";
 import { resumeForAnalysis } from "@/lib/resume/skills";
-import { mergeRequirements, resolveStatuses } from "./merge";
+import { type MergedRequirement, mergeRequirements, resolveStatuses } from "./merge";
 import { COMPARE_SYSTEM, comparePrompt, EXTRACT_SYSTEM, extractPrompt } from "./prompts";
 import { getProviders, type Provider } from "./providers";
 import { comparisonSchema, extractionSchema } from "./schemas";
@@ -54,46 +54,7 @@ export async function runAnalysis(analysisId: string) {
       },
     });
 
-    const comparisons = await runAll(providers, (p) =>
-      callStructured(
-        analysisId,
-        p,
-        "COMPARE",
-        comparisonSchema,
-        COMPARE_SYSTEM,
-        comparePrompt(resumeForAnalysis(analysis.resume), requirements),
-      ),
-    );
-    if (comparisons.length === 0) throw new Error("All AI providers failed to compare the resume.");
-
-    const resolved = resolveStatuses(
-      requirements,
-      comparisons.map((c) => c.output),
-    );
-
-    await db.$transaction([
-      db.analysisItem.deleteMany({ where: { analysisId } }),
-      db.analysisItem.createMany({
-        data: resolved.map((r) => ({
-          analysisId,
-          key: r.key,
-          name: r.name,
-          aliases: r.aliases,
-          category: r.category.toUpperCase() as ItemCategory,
-          importance: r.importance === "required" ? "REQUIRED" : "PREFERRED",
-          detail: r.detail,
-          status: r.status === "matched" ? "MATCHED" : r.status === "partial" ? "PARTIAL" : "MISSING",
-          evidence: r.evidence,
-          note: r.note,
-          foundBy: r.foundBy,
-          agreement: r.agreement,
-        })),
-      }),
-      db.analysis.update({
-        where: { id: analysisId },
-        data: { status: "COMPLETE", completedAt: new Date() },
-      }),
-    ]);
+    await compareAndSave(analysisId, providers, resumeForAnalysis(analysis.resume), requirements);
   } catch (error) {
     console.error(`Analysis ${analysisId} failed`, error);
     await db.analysis.update({
@@ -101,6 +62,47 @@ export async function runAnalysis(analysisId: string) {
       data: { status: "FAILED", error: error instanceof Error ? error.message : "Unexpected error" },
     });
   }
+}
+
+async function compareAndSave(
+  analysisId: string,
+  providers: Provider[],
+  resumeText: string,
+  requirements: MergedRequirement[],
+) {
+  const comparisons = await runAll(providers, (p) =>
+    callStructured(analysisId, p, "COMPARE", comparisonSchema, COMPARE_SYSTEM, comparePrompt(resumeText, requirements)),
+  );
+  if (comparisons.length === 0) throw new Error("All AI providers failed to compare the resume.");
+
+  const resolved = resolveStatuses(
+    requirements,
+    comparisons.map((c) => c.output),
+  );
+
+  await db.$transaction([
+    db.analysisItem.deleteMany({ where: { analysisId } }),
+    db.analysisItem.createMany({
+      data: resolved.map((r) => ({
+        analysisId,
+        key: r.key,
+        name: r.name,
+        aliases: r.aliases,
+        category: r.category.toUpperCase() as ItemCategory,
+        importance: r.importance === "required" ? "REQUIRED" : "PREFERRED",
+        detail: r.detail,
+        status: r.status === "matched" ? "MATCHED" : r.status === "partial" ? "PARTIAL" : "MISSING",
+        evidence: r.evidence,
+        note: r.note,
+        foundBy: r.foundBy,
+        agreement: r.agreement,
+      })),
+    }),
+    db.analysis.update({
+      where: { id: analysisId },
+      data: { status: "COMPLETE", completedAt: new Date() },
+    }),
+  ]);
 }
 
 /** Runs `fn` for every provider in parallel; keeps successes in provider order. */
@@ -113,7 +115,8 @@ async function runAll<T>(providers: Provider[], fn: (p: Provider) => Promise<T |
   return results;
 }
 
-async function callStructured<T>(
+/** One structured AI call, logged as a ProviderRun on the analysis. Returns null if it fails. */
+export async function callStructured<T>(
   analysisId: string,
   provider: Provider,
   step: PipelineStep,

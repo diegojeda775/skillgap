@@ -56,10 +56,12 @@ export function hasSkill(skills: string[], name: string) {
   return skills.some((s) => normalizeKey(s) === key);
 }
 
-/** The resume as the AI sees it: the text plus any skills added in the app. */
-export function resumeForAnalysis(resume: { text: string; skills: string[] }) {
-  if (resume.skills.length === 0) return resume.text;
-  return `${resume.text}\n\nSkills: ${resume.skills.join(", ")}`;
+/** The resume as the AI sees it: the text, skills added in the app, and a master's extra notes. */
+export function resumeForAnalysis(resume: { text: string; skills: string[]; notes?: string }) {
+  const parts = [resume.text];
+  if (resume.skills.length) parts.push(`Skills: ${resume.skills.join(", ")}`);
+  if (resume.notes?.trim()) parts.push(`Additional experience (from the candidate's notes):\n${resume.notes.trim()}`);
+  return parts.join("\n\n");
 }
 
 const SOFT_LINE_LABEL = /soft|interpersonal|personal|people|customer|professional/i;

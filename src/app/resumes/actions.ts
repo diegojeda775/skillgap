@@ -20,8 +20,12 @@ export async function uploadResume(_prev: ResumeFormState, formData: FormData): 
   if (!(file instanceof File) || file.size === 0) return { error: "Choose a resume file." };
 
   let id: string;
+  let isMaster = false;
   try {
     const { text, buffer, mimeType } = await readResumeFile(file);
+    // The first Word resume becomes the master that tailored versions are made from.
+    const hasMaster = (await db.resume.count({ where: { userId: user.id, isMaster: true } })) > 0;
+    isMaster = !hasMaster && mimeType === DOCX_MIME;
     id = (
       await db.resume.create({
         data: {
@@ -32,6 +36,7 @@ export async function uploadResume(_prev: ResumeFormState, formData: FormData): 
           skills: parseSkillsFromText(text),
           file: new Uint8Array(buffer),
           mimeType,
+          isMaster,
         },
       })
     ).id;
@@ -39,7 +44,7 @@ export async function uploadResume(_prev: ResumeFormState, formData: FormData): 
     if (error instanceof UserInputError) return { error: error.message };
     throw error;
   }
-  redirect(`/resumes/${id}`);
+  redirect(isMaster ? "/profile" : `/resumes/${id}`);
 }
 
 /** Swaps in a new file for a version (e.g. the DOCX of a resume first uploaded as PDF). */
@@ -104,7 +109,7 @@ export async function createTailoredResume(analysisId: string, _prev: ResumeForm
   // The tailored version is the one to send for this job.
   if (analysis.jobId) await db.job.update({ where: { id: analysis.jobId }, data: { resumeId: created.id } });
 
-  revalidatePath("/resumes");
+  revalidatePath("/profile");
   redirect(`/resumes/${created.id}?created=1`);
 }
 
@@ -124,15 +129,15 @@ export async function duplicateResume(resumeId: string) {
       mimeType: source.mimeType,
     },
   });
-  revalidatePath("/resumes");
+  revalidatePath("/profile");
   redirect(`/resumes/${copy.id}`);
 }
 
 export async function deleteResume(resumeId: string) {
   const user = await requireUser();
   await db.resume.deleteMany({ where: { id: resumeId, userId: user.id } });
-  revalidatePath("/resumes");
-  redirect("/resumes");
+  revalidatePath("/profile");
+  redirect("/profile");
 }
 
 async function editDocx(docx: Buffer, sectionLines: string[]) {
@@ -152,6 +157,7 @@ function fileSafe(name: string) {
 
 function revalidateResume(resumeId: string) {
   revalidatePath(`/resumes/${resumeId}`);
-  revalidatePath("/resumes");
+  revalidatePath("/profile");
+  revalidatePath("/profile");
   revalidatePath("/analyses/[id]", "page");
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { type ReactNode, useActionState, useEffect, useRef } from "react";
 import { createJob, type JobFormState } from "@/app/jobs/actions";
 import type { JobStage } from "@/generated/prisma/enums";
@@ -10,23 +11,25 @@ import { Dialog } from "../Dialog";
 interface Props {
   open: boolean;
   stage: JobStage;
-  resumes: { id: string; label: string }[];
   onClose: () => void;
 }
 
-export function AddJobDialog({ open, stage, resumes, onClose }: Props) {
+export function AddJobDialog({ open, stage, onClose }: Props) {
   const [state, formAction, pending] = useActionState<JobFormState, FormData>(createJob, { error: null });
   const formRef = useRef<HTMLFormElement>(null);
   const handled = useRef(state);
 
-  // Close once a save succeeds; the board refreshes from the server.
+  const router = useRouter();
+
+  // Once saved, open the job: its keywords and gaps are already being worked out.
   useEffect(() => {
     if (state !== handled.current && state.ok) {
       formRef.current?.reset();
       onClose();
+      if (state.jobId) router.push(`/jobs/${state.jobId}`);
     }
     handled.current = state;
-  }, [state, onClose]);
+  }, [state, onClose, router]);
 
   return (
     <Dialog open={open} onClose={onClose} title={`Add job to ${STAGE_BY_ID[stage].label}`} wide>
@@ -36,8 +39,8 @@ export function AddJobDialog({ open, stage, resumes, onClose }: Props) {
           <input type="url" name="url" placeholder="https://jobs.lever.co/…" className={input} />
         </Field>
         <p className="-mt-2 text-xs text-neutral-500">
-          The ad is saved with the job, so you can analyze it later even if the posting comes down. LinkedIn and
-          Indeed need a login, so paste those below.
+The ad is saved with the job, so it stays available if the posting comes down. LinkedIn and Indeed need
+          a login, so paste those below.
         </p>
         <Field label="Or paste the job ad">
           <textarea name="description" rows={5} className={`${input} font-mono text-xs`} />
@@ -52,16 +55,6 @@ export function AddJobDialog({ open, stage, resumes, onClose }: Props) {
           <Field label="Location">
             <input name="location" placeholder="Remote, Austin TX…" className={input} />
           </Field>
-          <Field label="Resume version">
-            <select name="resumeId" defaultValue={resumes[0]?.id ?? ""} className={input}>
-              <option value="">None yet</option>
-              {resumes.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-          </Field>
         </div>
 
         {state.error && (
@@ -75,7 +68,7 @@ export function AddJobDialog({ open, stage, resumes, onClose }: Props) {
             Cancel
           </button>
           <button type="submit" disabled={pending} className={primaryButton}>
-            {pending ? "Saving…" : "Save job"}
+            {pending ? "Saving…" : "Save & get keywords"}
           </button>
         </div>
       </form>

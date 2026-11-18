@@ -14,7 +14,8 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { Plus } from "lucide-react";
+import { ArrowRight, FileUp, Plus } from "lucide-react";
+import Link from "next/link";
 import { useId, useRef, useState, useTransition } from "react";
 import { moveJob, setOutcome } from "@/app/jobs/actions";
 import type { JobOutcome, JobStage } from "@/generated/prisma/enums";
@@ -44,11 +45,12 @@ type Columns = Record<JobStage, JobCardData[]>;
 
 interface Props {
   jobs: JobCardData[];
-  resumes: { id: string; label: string }[];
+  /** False until a master resume is uploaded; the board then points to the Profile page. */
+  hasMaster: boolean;
   stats: { applied: number; interviews: number; offers: number };
 }
 
-export function JobBoard({ jobs, resumes, stats }: Props) {
+export function JobBoard({ jobs, hasMaster, stats }: Props) {
   const [columns, setColumns] = useState(() => groupByStage(jobs));
   const [activeId, setActiveId] = useState<string | null>(null);
   const [addToStage, setAddToStage] = useState<JobStage | null>(null);
@@ -167,13 +169,27 @@ export function JobBoard({ jobs, resumes, stats }: Props) {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Job search</h1>
           <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-            Drag cards as your applications move forward. Open a card to run a skill gap analysis.
+            Add a job to get its keywords and gaps, then create a resume tailored to it.
           </p>
         </div>
         <button className={`${primaryButton} flex items-center gap-1.5`} onClick={() => setAddToStage("SAVED")}>
           <Plus className="size-4" aria-hidden /> Add job
         </button>
       </div>
+
+      {!hasMaster && (
+        <Link
+          href="/profile"
+          className="flex items-center gap-3 rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm text-violet-900 transition hover:border-violet-300 dark:border-violet-900 dark:bg-violet-950/50 dark:text-violet-200"
+        >
+          <FileUp className="size-5 shrink-0" aria-hidden />
+          <span>
+            <strong>Start with your master resume.</strong> Upload a Word file with all your experience, and every job
+            you add is checked against it.
+          </span>
+          <ArrowRight className="ml-auto size-4 shrink-0" aria-hidden />
+        </Link>
+      )}
 
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Stat label="Active applications" value={active} />
@@ -219,7 +235,6 @@ export function JobBoard({ jobs, resumes, stats }: Props) {
       <AddJobDialog
         open={addToStage !== null}
         stage={addToStage ?? "SAVED"}
-        resumes={resumes}
         onClose={() => setAddToStage(null)}
       />
 

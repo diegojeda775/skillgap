@@ -1,12 +1,11 @@
 "use client";
 
 import { Sparkles } from "lucide-react";
-import Link from "next/link";
 import { type ReactNode, useActionState } from "react";
 import { analyzeJob, changeStage, type JobFormState, setOutcome, updateJob } from "@/app/jobs/actions";
 import type { JobOutcome, JobStage } from "@/generated/prisma/enums";
 import { OUTCOMES, STAGES } from "@/lib/jobs/stages";
-import { input, primaryButton } from "../ui";
+import { input, primaryButton, secondaryButton } from "../ui";
 
 export function StageSelect({ jobId, stage }: { jobId: string; stage: JobStage }) {
   return (
@@ -50,45 +49,20 @@ export function OutcomeSelect({ jobId, outcome }: { jobId: string; outcome: JobO
   );
 }
 
-export function AnalyzeJobForm({
-  jobId,
-  resumes,
-  defaultResumeId,
-}: {
-  jobId: string;
-  resumes: { id: string; label: string }[];
-  defaultResumeId: string | null;
-}) {
-  const [state, formAction, pending] = useActionState<JobFormState, FormData>(analyzeJob.bind(null, jobId), { error: null });
-
-  if (resumes.length === 0) {
-    return (
-      <p className="text-sm text-neutral-600 dark:text-neutral-400">
-        <Link href="/resumes" className="font-medium underline">
-          Upload a resume
-        </Link>{" "}
-        first, then come back to compare it with this job.
-      </p>
-    );
-  }
-
+/** Starts (or refreshes) the keywords-and-gaps analysis of the job against the master resume. */
+export function AnalyzeJobButton({ jobId, label = "Get keywords & gaps", subtle }: { jobId: string; label?: string; subtle?: boolean }) {
+  const [state, formAction, pending] = useActionState<JobFormState, FormData>(() => analyzeJob(jobId), { error: null });
   return (
-    <form action={formAction} className="flex flex-wrap items-end gap-2">
-      <label className="min-w-48 flex-1 text-sm">
-        <span className="text-neutral-600 dark:text-neutral-400">Resume version</span>
-        <select name="resumeId" defaultValue={defaultResumeId ?? resumes[0].id} className={`${input} mt-1`}>
-          {resumes.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <button type="submit" disabled={pending} className={`${primaryButton} flex items-center gap-1.5`}>
+    <form action={formAction} className="space-y-2">
+      <button
+        type="submit"
+        disabled={pending}
+        className={subtle ? `${secondaryButton} flex items-center gap-1.5` : `${primaryButton} flex items-center gap-1.5`}
+      >
         <Sparkles className="size-4" aria-hidden />
-        {pending ? "Starting…" : "Get skill gaps & keywords"}
+        {pending ? "Starting…" : label}
       </button>
-      {state.error && <p className="w-full text-sm text-rose-700 dark:text-rose-400">{state.error}</p>}
+      {state.error && <p className="text-sm text-rose-700 dark:text-rose-400">{state.error}</p>}
     </form>
   );
 }
@@ -101,12 +75,11 @@ interface JobDetails {
   salary: string | null;
   url: string | null;
   notes: string;
-  resumeId: string | null;
   nextAction: string | null;
   nextActionAt: string;
 }
 
-export function JobDetailsForm({ job, resumes }: { job: JobDetails; resumes: { id: string; label: string }[] }) {
+export function JobDetailsForm({ job }: { job: JobDetails }) {
   const [state, formAction, pending] = useActionState<JobFormState, FormData>(updateJob.bind(null, job.id), { error: null });
 
   return (
@@ -129,21 +102,9 @@ export function JobDetailsForm({ job, resumes }: { job: JobDetails; resumes: { i
           <input name="location" defaultValue={job.location ?? ""} className={input} />
         </Field>
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Salary">
-          <input name="salary" defaultValue={job.salary ?? ""} placeholder="$90–110k" className={input} />
-        </Field>
-        <Field label="Resume used">
-          <select name="resumeId" defaultValue={job.resumeId ?? ""} className={input}>
-            <option value="">None</option>
-            {resumes.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-      </div>
+      <Field label="Salary">
+        <input name="salary" defaultValue={job.salary ?? ""} placeholder="$90–110k" className={input} />
+      </Field>
       <Field label="Job ad link">
         <input type="url" name="url" defaultValue={job.url ?? ""} className={input} />
       </Field>

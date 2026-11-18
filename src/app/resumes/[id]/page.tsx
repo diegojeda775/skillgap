@@ -1,9 +1,11 @@
-import { ArrowLeft, CheckCircle2, Copy, Trash2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Copy, Crown, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { deleteResume, duplicateResume, saveSkillsSection } from "@/app/resumes/actions";
+import { setMasterResume } from "@/app/tailor/actions";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { DownloadMenu } from "@/components/resumes/DownloadMenu";
+import { ResumeBadge } from "@/components/resumes/ResumeBadge";
 import { RenameResumeForm, ReplaceFileForm } from "@/components/resumes/ResumeForms";
 import { SkillsSectionEditor } from "@/components/resumes/SkillsSectionEditor";
 import { card, deleteIconButton, secondaryButton } from "@/components/ui";
@@ -24,6 +26,7 @@ export default async function ResumePage({ params, searchParams }: PageProps<"/r
     include: {
       _count: { select: { analyses: true } },
       jobs: { select: { id: true, title: true, company: true }, orderBy: { updatedAt: "desc" }, take: 10 },
+      source: { select: { id: true, label: true, fileName: true } },
     },
   });
   if (!resume) notFound();
@@ -41,8 +44,8 @@ export default async function ResumePage({ params, searchParams }: PageProps<"/r
 
   return (
     <div className="mx-auto max-w-4xl space-y-6">
-      <Link href="/resumes" className="inline-flex items-center gap-1 text-sm text-neutral-500 hover:text-neutral-900 dark:hover:text-white">
-        <ArrowLeft className="size-4" aria-hidden /> Resumes
+      <Link href="/profile" className="inline-flex items-center gap-1 text-sm text-neutral-500 hover:text-neutral-900 dark:hover:text-white">
+        <ArrowLeft className="size-4" aria-hidden /> Profile
       </Link>
 
       {created && (
@@ -54,12 +57,32 @@ export default async function ResumePage({ params, searchParams }: PageProps<"/r
 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{resumeLabel(resume)}</h1>
+          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+            {resumeLabel(resume)}
+            {resume.isMaster && <ResumeBadge kind="master" />}
+            {resume.source && <ResumeBadge kind="tailored" />}
+          </h1>
           <p className="mt-1 text-sm text-neutral-500">
             {resume.fileName} · updated {resume.updatedAt.toLocaleDateString()}
+            {resume.source && (
+              <>
+                {" "}
+                · tailored from{" "}
+                <Link href={`/resumes/${resume.source.id}`} className="underline underline-offset-2">
+                  {resumeLabel(resume.source)}
+                </Link>
+              </>
+            )}
           </p>
         </div>
         <div className="flex gap-2">
+          {isDocx && !resume.isMaster && !resume.source && (
+            <form action={setMasterResume.bind(null, resume.id)}>
+              <button className={`${secondaryButton} flex h-full items-center gap-1.5`}>
+                <Crown className="size-3.5" aria-hidden /> Make master
+              </button>
+            </form>
+          )}
           {resume.file && <DownloadMenu resumeId={resume.id} isDocx={isDocx} />}
           <form action={duplicateResume.bind(null, resume.id)}>
             <button className={`${secondaryButton} flex h-full items-center gap-1.5`}>

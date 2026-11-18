@@ -18,8 +18,14 @@ interface StartAnalysisInput {
   jobId?: string | null;
 }
 
-/** Creates an analysis and runs it after the response is sent. Returns the analysis id. */
-export async function startAnalysis(input: StartAnalysisInput): Promise<string> {
+/**
+ * Creates an analysis and runs it after the response is sent. Returns the analysis id.
+ * `run` lets callers do follow-up work once the analysis finishes.
+ */
+export async function startAnalysis(
+  input: StartAnalysisInput,
+  run: (analysisId: string) => Promise<void> = runAnalysis,
+): Promise<string> {
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const recent = await db.analysis.count({ where: { userId: input.userId, createdAt: { gte: since } } });
   if (recent >= DAILY_ANALYSIS_LIMIT) {
@@ -30,7 +36,7 @@ export async function startAnalysis(input: StartAnalysisInput): Promise<string> 
     data: { ...input, jobText: input.jobText.slice(0, MAX_JOB_CHARS) },
   });
 
-  // The results page polls until the run finishes.
-  after(() => runAnalysis(analysis.id));
+  // The page showing it polls until the run finishes.
+  after(() => run(analysis.id));
   return analysis.id;
 }
