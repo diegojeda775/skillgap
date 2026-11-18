@@ -1,22 +1,21 @@
 "use client";
 
-import { FileText, History, KanbanSquare, Sparkles } from "lucide-react";
+import { History, KanbanSquare, UserRound } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const LINKS = [
-  { href: "/jobs", label: "Jobs", icon: KanbanSquare },
-  { href: "/resumes", label: "Resumes", icon: FileText },
-  { href: "/analyze", label: "Quick analysis", icon: Sparkles },
-  { href: "/analyses", label: "History", icon: History },
+  { href: "/jobs", label: "Jobs", icon: KanbanSquare, also: [] as string[] },
+  { href: "/profile", label: "Profile", icon: UserRound, also: ["/resumes"] },
+  { href: "/analyses", label: "History", icon: History, also: ["/analyze"] },
 ];
 
 export function NavLinks() {
   const pathname = usePathname();
   return (
     <div className="flex items-center gap-1 overflow-x-auto">
-      {LINKS.map(({ href, label, icon: Icon }) => {
-        const active = pathname === href || pathname.startsWith(`${href}/`);
+      {LINKS.map(({ href, label, icon: Icon, also }) => {
+        const active = [href, ...also].some((p) => pathname === p || pathname.startsWith(`${p}/`));
         return (
           <Link
             key={href}

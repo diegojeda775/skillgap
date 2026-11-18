@@ -3,16 +3,17 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { JobOutcome, JobStage } from "@/generated/prisma/enums";
-import { startAnalysis } from "@/lib/analysis/start";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { UserInputError } from "@/lib/errors";
 import { fetchJobAd } from "@/lib/ingest/job-url";
 import { isOutcome, isStage } from "@/lib/jobs/stages";
+import { startJobAnalysis } from "@/lib/tailor/job-analysis";
 
-export type JobFormState = { error: string | null; ok?: boolean };
+export type JobFormState = { error: string | null; ok?: boolean; jobId?: string };
 
 const POSITION_GAP = 1024;
+const MIN_AD_CHARS = 200;
 
 export async function createJob(_prev: JobFormState, formData: FormData): Promise<JobFormState> {
   const user = await requireUser();
@@ -37,8 +38,7 @@ export async function createJob(_prev: JobFormState, formData: FormData): Promis
   }
   if (!title) return { error: "Add the job title." };
 
-  const resumeId = await ownedResumeId(user.id, text(formData, "resumeId"));
-  await db.job.create({
+  const job = await db.job.create({
     data: {
       userId: user.id,
       title,
@@ -47,15 +47,25 @@ export async function createJob(_prev: JobFormState, formData: FormData): Promis
       url,
       description,
       stage,
-      resumeId,
       position: (await topPosition(user.id, stage)) - POSITION_GAP,
       appliedAt: stage === "APPLIED" ? new Date() : null,
       events: { create: { to: stage } },
     },
   });
 
+  // Get the keywords and gaps right away, so they're ready when the job is opened.
+  const master = await masterResumeId(user.id);
+  if (master && description.length >= MIN_AD_CHARS) {
+    try {
+      await startJobAnalysis(job, master);
+    } catch (error) {
+      // Over the daily limit: the job page offers to analyze later.
+      if (!(error instanceof UserInputError)) throw error;
+    }
+  }
+
   revalidatePath("/jobs");
-  return { error: null, ok: true };
+  return { error: null, ok: true, jobId: job.id };
 }
 
 /** Called after a drag and drop. `position` is computed by the board from the card's new neighbors. */
@@ -127,7 +137,6 @@ export async function updateJob(jobId: string, _prev: JobFormState, formData: Fo
       salary: text(formData, "salary"),
       url: text(formData, "url"),
       notes: text(formData, "notes") ?? "",
-      resumeId: await ownedResumeId(user.id, text(formData, "resumeId")),
       nextAction: text(formData, "nextAction"),
       // Date inputs give "YYYY-MM-DD"; store noon UTC so the day doesn't shift across time zones.
       nextActionAt: nextActionAt ? new Date(`${nextActionAt}T12:00:00Z`) : null,
@@ -154,34 +163,26 @@ export async function deleteJob(jobId: string) {
   redirect("/jobs");
 }
 
-/** "Get skill gaps & keywords" on a job: analyzes the saved ad against a resume version. */
-export async function analyzeJob(jobId: string, _prev: JobFormState, formData: FormData): Promise<JobFormState> {
+/** "Get keywords & gaps" on a job: compares the saved ad with the master resume. */
+export async function analyzeJob(jobId: string): Promise<JobFormState> {
   const user = await requireUser();
   const job = await db.job.findFirst({ where: { id: jobId, userId: user.id } });
   if (!job) return { error: "Job not found." };
 
-  const resumeId = await ownedResumeId(user.id, text(formData, "resumeId"));
-  if (!resumeId) return { error: "Pick a resume version, or upload one on the Resumes page." };
-  if (job.description.length < 200) return { error: "The saved job ad is too short. Paste the full description in Edit details." };
+  const master = await masterResumeId(user.id);
+  if (!master) return { error: "Upload your master resume on your Profile first." };
+  if (job.description.length < MIN_AD_CHARS) {
+    return { error: "The saved job ad is too short. Paste the full description under Details." };
+  }
 
-  let analysisId: string;
   try {
-    analysisId = await startAnalysis({
-      userId: user.id,
-      resumeId,
-      jobId: job.id,
-      jobText: job.description,
-      jobUrl: job.url,
-      jobTitle: job.title,
-      company: job.company,
-    });
+    await startJobAnalysis(job, master);
   } catch (error) {
     if (error instanceof UserInputError) return { error: error.message };
     throw error;
   }
-
-  if (!job.resumeId) await db.job.update({ where: { id: job.id }, data: { resumeId } });
-  redirect(`/analyses/${analysisId}`);
+  revalidatePath(`/jobs/${jobId}`);
+  return { error: null, ok: true };
 }
 
 function text(formData: FormData, key: string): string | null {
@@ -189,10 +190,9 @@ function text(formData: FormData, key: string): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-async function ownedResumeId(userId: string, resumeId: string | null) {
-  if (!resumeId) return null;
-  const resume = await db.resume.findFirst({ where: { id: resumeId, userId }, select: { id: true } });
-  return resume?.id ?? null;
+async function masterResumeId(userId: string) {
+  const master = await db.resume.findFirst({ where: { userId, isMaster: true }, select: { id: true } });
+  return master?.id ?? null;
 }
 
 async function topPosition(userId: string, stage: JobStage) {

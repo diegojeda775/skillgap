@@ -64,6 +64,120 @@ export async function writeSkillsSection(docx: Buffer, newLines: string[]): Prom
   return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
 }
 
+export interface DocParagraph {
+  /** Stable index of the paragraph in the document; pass it back to applyParagraphEdits. */
+  id: number;
+  text: string;
+  /** Headings, contact details and job title/date lines, which tailoring must not change. */
+  locked: boolean;
+}
+
+export interface ParagraphEdits {
+  rewrite: { id: number; text: string }[];
+  remove: number[];
+  /** New paragraphs styled like the one they follow (e.g. another bullet under the same job). */
+  insertAfter: { afterId: number; text: string }[];
+}
+
+/** Every non-empty paragraph with its id and whether it may be edited. */
+export async function listParagraphs(docx: Buffer): Promise<DocParagraph[]> {
+  const { doc } = await load(docx);
+  return classify(paragraphs(doc)).filter((p) => p.text.trim());
+}
+
+/** Applies rewrites, removals and inserts to unlocked paragraphs, keeping each run's formatting. */
+export async function applyParagraphEdits(docx: Buffer, edits: ParagraphEdits): Promise<Buffer> {
+  const { zip, doc, declaration } = await load(docx);
+  const all = paragraphs(doc);
+  const info = classify(all);
+  const editable = (id: number) => info[id] !== undefined && !info[id].locked;
+
+  // Inserts first: they only add siblings, so the other paragraphs' elements stay valid.
+  const lastInserted = new Map<number, Element>();
+  for (const { afterId, text } of edits.insertAfter) {
+    if (!editable(afterId) || !text.trim()) continue;
+    const anchor = lastInserted.get(afterId) ?? all[afterId].el;
+    const clone = cloneWithText(all[afterId].el, text);
+    anchor.parentNode?.insertBefore(clone, anchor.nextSibling);
+    lastInserted.set(afterId, clone);
+  }
+  for (const { id, text } of edits.rewrite) {
+    if (editable(id) && text.trim() && text !== all[id].text) editParagraph(all[id], text);
+  }
+  for (const id of edits.remove) {
+    if (editable(id)) all[id].el.parentNode?.removeChild(all[id].el);
+  }
+
+  const xml = new XMLSerializer().serializeToString(doc);
+  zip.file(DOCUMENT_PATH, xml.startsWith("<?xml") ? xml : declaration + xml);
+  return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+}
+
+const DATE_RANGE =
+  /\b(?:19|20)\d{2}\s*(?:-|–|—|to)\s*(?:(?:19|20)\d{2}|present|current|now)\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(?:19|20)\d{2}\b/i;
+const CONTACT = /@|https?:\/\/|linkedin|github\.com|\+?\d[\d\s().-]{7,}\d/i;
+
+function classify(all: Paragraph[]): DocParagraph[] {
+  const flat = (p: Paragraph) => p.text.replace(/\s+/g, " ").trim();
+  const isHeading = (p: Paragraph) => {
+    const t = flat(p);
+    if (!t || t.length >= 60) return false;
+    return (
+      (OTHER_HEADING.test(t) && !/:\s*\S/.test(t)) ||
+      isHeadingLike(t) ||
+      (SKILLS_HEADING.test(t) && !t.match(SKILLS_HEADING)?.[1]?.trim()) ||
+      hasHeadingStyle(p.el) ||
+      (isAllBold(p) && !t.endsWith("."))
+    );
+  };
+  const firstText = all.findIndex((p) => flat(p));
+
+  return all.map((p, id) => {
+    const t = flat(p);
+    const bullet = isBullet(p, t);
+    const locked =
+      !t ||
+      id === firstText || // the name
+      isHeading(p) ||
+      (CONTACT.test(t) && t.length < 200) ||
+      (DATE_RANGE.test(t) && t.length < 140) ||
+      // Job, school and certification lines: facts like titles, employers and years stay as they are.
+      (!bullet && t.length < 140 && /\b(?:19|20)\d{2}\b/.test(t)) ||
+      (!bullet && isRoleHeader(p, t));
+    return { id, text: p.text, locked };
+  });
+}
+
+/** "Help Desk Analyst | Acme Corp" or a line starting with a bold job title (but not "Label: items"). */
+function isRoleHeader(p: Paragraph, t: string) {
+  if (t.length >= 120 || /[.!?]$/.test(t)) return false;
+  if (/\s[|•·]\s/.test(t)) return true;
+  const first = p.pieces.find((piece) => piece.text.trim());
+  return first !== undefined && isBoldRun(first) && !/^[^:]{1,40}:/.test(t);
+}
+
+function isBullet(p: Paragraph, t: string) {
+  return p.el.getElementsByTagNameNS(W, "numPr").length > 0 || /^[•\-–▪●◦*]\s/.test(t);
+}
+
+function hasHeadingStyle(p: Element) {
+  const styles = p.getElementsByTagNameNS(W, "pStyle");
+  return styles.length > 0 && /heading|title/i.test(styles[0].getAttributeNS(W, "val") ?? "");
+}
+
+/** Every visible character is in a bold run: job titles and company lines in most templates. */
+function isAllBold(p: Paragraph) {
+  const textPieces = p.pieces.filter((piece) => piece.text.trim() && piece.text !== "\n" && piece.text !== "\t");
+  return textPieces.length > 0 && textPieces.every(isBoldRun);
+}
+
+function isBoldRun(piece: Piece) {
+  const run = piece.node.parentNode as Element | null;
+  const bold = run?.getElementsByTagNameNS(W, "b")[0];
+  const val = bold?.getAttributeNS(W, "val");
+  return bold !== undefined && val !== "0" && val !== "false";
+}
+
 async function load(docx: Buffer) {
   const zip = await JSZip.loadAsync(docx);
   const file = zip.file(DOCUMENT_PATH);

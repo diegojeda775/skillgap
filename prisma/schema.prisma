@@ -14,9 +14,10 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  resumes  Resume[]
-  analyses Analysis[]
-  jobs     Job[]
+  resumes    Resume[]
+  analyses   Analysis[]
+  jobs       Job[]
+  tailorRuns TailorRun[]
 }
 
 /// One resume version, e.g. "Frontend" or "IT Support". `skills` is the editable
@@ -31,12 +32,22 @@ model Resume {
   /// The uploaded file. DOCX files are edited in place so their formatting is kept.
   file      Bytes?
   mimeType  String?
+  /// The cumulative resume: everything the user has done. Tailored versions are cut from it.
+  isMaster  Boolean  @default(false)
+  /// Extra facts for the master that aren't in the file (projects, tools, achievements).
+  notes     String   @default("") @db.Text
+  /// For tailored versions: the master they were made from.
+  sourceResumeId String?
   createdAt DateTime @default(now())
   updatedAt DateTime @default(now()) @updatedAt
 
-  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  analyses Analysis[]
-  jobs     Job[]
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source     Resume?     @relation("TailoredFrom", fields: [sourceResumeId], references: [id], onDelete: SetNull)
+  tailored   Resume[]    @relation("TailoredFrom")
+  analyses   Analysis[]
+  jobs       Job[]
+  masterRuns TailorRun[] @relation("TailorMaster")
+  resultRuns TailorRun[] @relation("TailorResult")
 
   @@index([userId, createdAt])
 }
@@ -122,6 +133,7 @@ model AnalysisItem {
 enum PipelineStep {
   EXTRACT
   COMPARE
+  WRITE
 }
 
 /// One AI call, kept for debugging, cost tracking and provider quality comparison.
@@ -175,6 +187,8 @@ model Job {
   /// Sort order within a board column; new positions are midpoints between neighbors.
   position       Float       @default(0)
   outcome        JobOutcome?
+  /// ATS-style keyword match in percent: the master's at first, then the tailored resume's.
+  matchScore     Int?
   /// The resume version used (or planned) for this application.
   resumeId       String?
   nextAction     String?
@@ -184,10 +198,11 @@ model Job {
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
-  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  resume   Resume?    @relation(fields: [resumeId], references: [id], onDelete: SetNull)
-  analyses Analysis[]
-  events   JobEvent[]
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resume     Resume?     @relation(fields: [resumeId], references: [id], onDelete: SetNull)
+  analyses   Analysis[]
+  events     JobEvent[]
+  tailorRuns TailorRun[]
 
   @@index([userId, stage, position])
 }
@@ -202,5 +217,57 @@ model JobEvent {
 
   job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
+  @@index([jobId])
+}
+
+// --- Tailoring ---
+
+enum TailorStatus {
+  QUEUED
+  ANALYZING
+  WRITING
+  SCORING
+  COMPLETE
+  FAILED
+}
+
+/// One "tailor my master resume to this job" run.
+model TailorRun {
+  id                 String       @id @default(cuid())
+  userId             String
+  jobId              String?
+  masterResumeId     String
+  resultResumeId     String?
+  baselineAnalysisId String?
+  finalAnalysisId    String?
+  jobTitle           String
+  company            String?
+  status             TailorStatus @default(QUEUED)
+  error              String?
+  /// ATS-style keyword match targets, in percent.
+  targetScore        Int          @default(85)
+  /// Keyword match of the master as uploaded.
+  baselineScore      Int?
+  /// Best keyword match the master honestly supports.
+  ceilingScore       Int?
+  finalScore         Int?
+  rounds             Int          @default(0)
+  /// [{ id, name, detail }] keywords the user chose to add, with where they used each (optional).
+  selected           Json?
+  /// [{ name, importance }] keywords that are in the tailored resume but weren't in the master's wording.
+  added              Json?
+  /// [{ name, importance }] supported keywords the rewrite still didn't include.
+  notAdded           Json?
+  /// [{ name, importance, note }] keywords the master doesn't clearly show; claiming them would be untrue.
+  gaps               Json?
+  createdAt          DateTime     @default(now())
+  completedAt        DateTime?
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job    Job?    @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  master Resume  @relation("TailorMaster", fields: [masterResumeId], references: [id], onDelete: Cascade)
+  result Resume? @relation("TailorResult", fields: [resultResumeId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
   @@index([jobId])
 }
