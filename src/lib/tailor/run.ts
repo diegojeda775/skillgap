@@ -5,12 +5,15 @@ import { getProviders } from "@/lib/analysis/providers";
 import { db } from "@/lib/db";
 import { DOCX_MIME, resumeText } from "@/lib/ingest/resume";
 import { applyParagraphEdits, listParagraphs } from "@/lib/resume/docx";
+import { docxToPdf, pdfPageCount } from "@/lib/resume/pdf";
 import { parseSkillsFromText } from "@/lib/resume/skills";
 import { keywordItems, keywordMatch, weightedPercent } from "./keywords";
 import { sanitizeEdits, WRITER_SYSTEM, type WriterOutput, writerPrompt, writerSchema } from "./writer";
 
-const MAX_ROUNDS = 3;
-const MAX_WORDS = 700;
+const MAX_ROUNDS = 4;
+/** About what fits on one page with normal margins and a 10–11pt font. */
+const ONE_PAGE_WORDS = 550;
+const MIN_WORDS = 250;
 
 export interface SelectedKeyword {
   /** AnalysisItem id. */
@@ -23,8 +26,10 @@ export interface SelectedKeyword {
 /**
  * Creates a tailored resume from the master and the keywords the user chose:
  *   1. the writer rewrites the master's DOCX in place to work the chosen keywords in
- *   2. repeat until every chosen keyword is in, it stops improving, or MAX_ROUNDS
- *   3. save the best version as a new resume linked to the job
+ *   2. the headline next to the name becomes the job's title
+ *   3. lay it out as a PDF to count pages; repeat with a tighter budget while it runs past one page,
+ *      or while chosen keywords are missing and it keeps improving (up to MAX_ROUNDS)
+ *   4. save the best version (one page first, then highest match) as a new resume linked to the job
  * Takes only an id so it can move to a queue worker unchanged.
  */
 export async function runTailor(runId: string) {
@@ -56,8 +61,11 @@ export async function runTailor(runId: string) {
 
     const paragraphs = await listParagraphs(masterDocx);
     const sourceText = `${master.text}\n${master.notes}`;
-    let best: { docx: Buffer; text: string; score: number; present: Set<string> } | null = null;
+    const headline = headlineTitle(job.title);
+    let best: Attempt | null = null;
     let stillMissing: string[] | undefined;
+    let pages: number | undefined;
+    let maxWords = ONE_PAGE_WORDS;
 
     for (let round = 1; round <= MAX_ROUNDS; round++) {
       const prompt = writerPrompt({
@@ -76,8 +84,9 @@ export async function runTailor(runId: string) {
           })),
         alreadyPresent: items.filter((i) => masterMatch.present.has(i.id)).map((i) => i.name),
         unsupported: items.filter((i) => !chosen(i)).map((i) => i.name),
-        maxWords: MAX_WORDS,
+        maxWords,
         stillMissing,
+        pages,
       });
       let output: WriterOutput | null = null;
       for (const writer of writers) {
@@ -89,15 +98,23 @@ export async function runTailor(runId: string) {
         throw new Error("The AI couldn't rewrite the resume. Try again in a moment.");
       }
 
-      const docx = await applyParagraphEdits(masterDocx, sanitizeEdits(output, paragraphs, sourceText));
+      const docx = await applyParagraphEdits(masterDocx, { ...sanitizeEdits(output, paragraphs, sourceText), headline });
       const text = await resumeText(docx, DOCX_MIME);
       const { score, present } = keywordMatch(text, items);
-      const improved = !best || score > best.score;
-      if (improved) best = { docx, text, score, present };
+      const attempt: Attempt = { docx, text, score, present, pages: await countPages(docx) };
+      const improved = isBetter(attempt, best);
+      if (improved) best = attempt;
       await db.tailorRun.update({ where: { id: runId }, data: { rounds: round, finalScore: best!.score } });
 
-      if (best!.score >= ceiling || !improved) break;
+      if (fitsOnePage(best!) && (best!.score >= ceiling || !improved)) break;
       stillMissing = items.filter((i) => chosen(i) && !best!.present.has(i.id)).map((i) => i.name);
+      if (!fitsOnePage(attempt)) {
+        // Shrink the budget by about how far it ran over.
+        const words = attempt.text.split(/\s+/).filter(Boolean).length;
+        const factor = attempt.pages === 2 ? 0.85 : 1.1 / attempt.pages!;
+        maxWords = Math.max(MIN_WORDS, Math.min(maxWords - 40, Math.round(words * factor)));
+        pages = attempt.pages!;
+      } else pages = undefined;
     }
     if (!best) throw new Error("The AI couldn't rewrite the resume.");
 
@@ -139,4 +156,45 @@ export async function runTailor(runId: string) {
       data: { status: "FAILED", error: error instanceof Error ? error.message : "Unexpected error" },
     });
   }
+}
+
+interface Attempt {
+  docx: Buffer;
+  text: string;
+  score: number;
+  present: Set<string>;
+  /** Null when the PDF converter isn't available to measure it. */
+  pages: number | null;
+}
+
+const fitsOnePage = (a: Attempt) => a.pages === null || a.pages <= 1;
+
+/** One page beats a higher match; then the higher match; then fewer pages. */
+function isBetter(a: Attempt, best: Attempt | null) {
+  if (!best) return true;
+  if (fitsOnePage(a) !== fitsOnePage(best)) return fitsOnePage(a);
+  if (a.score !== best.score) return a.score > best.score;
+  return (a.pages ?? 1) < (best.pages ?? 1);
+}
+
+/** Lays the resume out with LibreOffice to count pages; null when the converter is unavailable. */
+async function countPages(docx: Buffer): Promise<number | null> {
+  if (!process.env.GOTENBERG_URL) return null;
+  try {
+    return pdfPageCount(await docxToPdf(new Uint8Array(docx))) || null;
+  } catch (error) {
+    console.warn("Couldn't count the tailored resume's pages", error);
+    return null;
+  }
+}
+
+/** "IT Support Technician II (Remote) - Hybrid" → "IT Support Technician II". */
+export function headlineTitle(title: string) {
+  return (
+    title
+      .replace(/\s*[([][^)\]]*[)\]]/g, "")
+      .replace(/\s+[-–—|,/]\s*(?:remote|hybrid|on-?site|in-?office|contract|full[- ]time|part[- ]time)\b.*$/i, "")
+      .replace(/\s+/g, " ")
+      .trim() || title.trim()
+  );
 }

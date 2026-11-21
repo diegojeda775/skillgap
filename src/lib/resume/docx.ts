@@ -70,6 +70,13 @@ export interface DocParagraph {
   text: string;
   /** Headings, contact details and job title/date lines, which tailoring must not change. */
   locked: boolean;
+  /**
+   * In an experience-type section: the id of the role's first line (its header). A whole role
+   * can be dropped by passing that id in `removeEntries`.
+   */
+  entry: number | null;
+  /** The headline next to the name ("Cumulative Resume", "IT Support Technician"), if there is one. */
+  headline: boolean;
 }
 
 export interface ParagraphEdits {
@@ -77,6 +84,10 @@ export interface ParagraphEdits {
   remove: number[];
   /** New paragraphs styled like the one they follow (e.g. another bullet under the same job). */
   insertAfter: { afterId: number; text: string }[];
+  /** Entry ids (see DocParagraph.entry): removes the role's header, dates, bullets and spacing. */
+  removeEntries?: number[];
+  /** Replaces the headline next to the name, in its own formatting. */
+  headline?: string;
 }
 
 /** Every non-empty paragraph with its id and whether it may be edited. */
@@ -91,6 +102,14 @@ export async function applyParagraphEdits(docx: Buffer, edits: ParagraphEdits): 
   const all = paragraphs(doc);
   const info = classify(all);
   const editable = (id: number) => info[id] !== undefined && !info[id].locked;
+
+  if (edits.headline?.trim()) setHeadline(all, info, edits.headline.trim());
+
+  // Whole roles, with the blank spacing paragraphs that follow them.
+  const dropped = new Set(edits.removeEntries ?? []);
+  for (const p of info) {
+    if (p.entry !== null && dropped.has(p.entry)) all[p.id].el.parentNode?.removeChild(all[p.id].el);
+  }
 
   // Inserts first: they only add siblings, so the other paragraphs' elements stay valid.
   const lastInserted = new Map<number, Element>();
@@ -131,21 +150,91 @@ function classify(all: Paragraph[]): DocParagraph[] {
     );
   };
   const firstText = all.findIndex((p) => flat(p));
+  const headlineId = findHeadline(all, firstText);
 
-  return all.map((p, id) => {
+  const result: DocParagraph[] = [];
+  let previous: DocParagraph | null = null; // last non-empty paragraph
+  let previousIsHeading = false;
+  let inEntries = false; // inside an experience-type section
+  let entry: number | null = null;
+
+  all.forEach((p, id) => {
     const t = flat(p);
+    if (!t) {
+      // Blank spacing lines go with the role above them.
+      result.push({ id, text: p.text, locked: true, entry, headline: false });
+      return;
+    }
+    const heading = id !== firstText && isHeading(p);
     const bullet = isBullet(p, t);
     const locked =
-      !t ||
       id === firstText || // the name
-      isHeading(p) ||
+      id === headlineId ||
+      heading ||
       (CONTACT.test(t) && t.length < 200) ||
       (DATE_RANGE.test(t) && t.length < 140) ||
       // Job, school and certification lines: facts like titles, employers and years stay as they are.
       (!bullet && t.length < 140 && /\b(?:19|20)\d{2}\b/.test(t)) ||
-      (!bullet && isRoleHeader(p, t));
-    return { id, text: p.text, locked };
+      (!bullet && isRoleHeader(p, t)) ||
+      // "Acme Corp – Los Angeles, CA" right under a job title line.
+      (!bullet && t.length < 120 && !/[.!?]$/.test(t) && previous?.locked === true && !previousIsHeading && previous.entry !== null);
+
+    if (heading) {
+      inEntries = ENTRY_SECTIONS.test(t);
+      entry = null;
+    } else if (inEntries && locked && (previousIsHeading || previous?.locked === false)) {
+      entry = id; // a new role starts at the first locked line after a heading or bullets
+    }
+    const paragraph: DocParagraph = { id, text: p.text, locked, entry: heading ? null : entry, headline: id === headlineId };
+    result.push(paragraph);
+    previous = paragraph;
+    previousIsHeading = heading;
   });
+
+  // Blank lines before a heading separate sections, not roles: keep them when the last role goes.
+  for (let i = result.length - 1, beforeHeading = false; i >= 0; i--) {
+    const t = flat(all[i]);
+    if (!t) {
+      if (beforeHeading) result[i].entry = null;
+    } else beforeHeading = result[i].entry === null;
+  }
+  return result;
+}
+
+const ENTRY_SECTIONS = /experience|employment|work history|projects|volunteer/i;
+
+/**
+ * The title next to the name: after a tab or separator on the name line ("Jane Doe⇥Cumulative"),
+ * or a short line of its own right under the name. Returns the paragraph id, or -1.
+ */
+function findHeadline(all: Paragraph[], nameId: number): number {
+  if (nameId === -1) return -1;
+  if (splitHeadline(all[nameId].text)) return nameId;
+  const next = all.findIndex((p, i) => i > nameId && p.text.trim());
+  if (next === -1) return -1;
+  const t = all[next].text.replace(/\s+/g, " ").trim();
+  const isTitle =
+    t.length <= 60 &&
+    t.split(" ").length <= 7 &&
+    !/\d|@|https?:|linkedin|github|[.,:;]$/i.test(t) &&
+    !(OTHER_HEADING.test(t) || SKILLS_HEADING.test(t));
+  return isTitle ? next : -1;
+}
+
+/** "Jane Doe⇥Cumulative Resume" → { keep: "Jane Doe⇥", title: "Cumulative Resume" }. */
+function splitHeadline(text: string): { keep: string; title: string } | null {
+  const match = text.match(/^(.*?\S.*?(?:\t+|\s+[|•·–—-]\s+|\n))\s*([^\t\n|•·]{2,60}?)\s*$/);
+  if (!match || !/[a-z]/i.test(match[2])) return null;
+  return { keep: match[1], title: match[2] };
+}
+
+function setHeadline(all: Paragraph[], info: DocParagraph[], title: string) {
+  const id = info.findIndex((p) => p.headline);
+  if (id === -1) return;
+  const paragraph = all[id];
+  const split = splitHeadline(paragraph.text);
+  const next = split && info.findIndex((p) => p.text.trim()) === id ? split.keep + title : title;
+  if (next !== paragraph.text) editParagraph(paragraph, next);
 }
 
 /** "Help Desk Analyst | Acme Corp" or a line starting with a bold job title (but not "Label: items"). */

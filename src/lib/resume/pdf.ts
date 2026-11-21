@@ -28,3 +28,8 @@ export async function docxToPdf(docx: Uint8Array<ArrayBuffer>): Promise<Uint8Arr
   if (!res.ok) throw new PdfConversionError(`The PDF converter failed (${res.status}): ${(await res.text()).slice(0, 200)}`);
   return new Uint8Array(await res.arrayBuffer());
 }
+
+/** Number of pages in a PDF (counts page objects; LibreOffice writes them uncompressed). */
+export function pdfPageCount(pdf: Uint8Array): number {
+  return Buffer.from(pdf).toString("latin1").match(/\/Type\s*\/Page(?![a-zA-Z])/g)?.length ?? 0;
+}

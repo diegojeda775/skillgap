@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft, CalendarClock, Check, ExternalLink, FilePen, FileUp, Loader2, MapPin, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CalendarClock, Check, ExternalLink, FilePen, FileText, FileUp, Loader2, MapPin, RefreshCw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
@@ -14,8 +14,10 @@ import { card, deleteIconButton, primaryButton, secondaryButton } from "@/compon
 import type { AnalysisItem } from "@/generated/prisma/client";
 import { requireUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { DOCX_MIME } from "@/lib/ingest/resume";
 import { dueState, formatDueDate, toDateInput } from "@/lib/jobs/dates";
 import { STAGE_BY_ID } from "@/lib/jobs/stages";
+import { resumeLabel } from "@/lib/resume/label";
 import { keywordItems, keywordMatch } from "@/lib/tailor/keywords";
 import type { SelectedKeyword } from "@/lib/tailor/run";
 
@@ -27,7 +29,11 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
   const user = await requireUser();
 
   const [job, master] = await Promise.all([
-    db.job.findFirst({ where: { id, userId: user.id }, include: { events: { orderBy: { createdAt: "desc" } } } }),
+    db.job.findFirst({ where: { id, userId: user.id }, include: {
+        events: { orderBy: { createdAt: "desc" } },
+        resume: { select: { id: true, label: true, fileName: true, mimeType: true, updatedAt: true } },
+      },
+    }),
     db.resume.findFirst({ where: { userId: user.id, isMaster: true }, select: { id: true, text: true, updatedAt: true } }),
   ]);
   if (!job) notFound();
@@ -113,6 +119,11 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
         </div>
 
         <aside className="space-y-6">
+          <AttachedResume
+            resume={job.resume}
+            writing={!!run && run.status !== "COMPLETE" && run.status !== "FAILED"}
+          />
+
           {job.nextAction && (
             <section
               className={`${card} ${
@@ -363,6 +374,51 @@ function ResumeWorkflow({ jobId, master, analysis, run, editing, adLength }: Wor
         submitLabel={run?.result ? "Create new version" : "Create tailored resume"}
       />
     </Panel>
+  );
+}
+
+/** The resume that goes with this application, ready to download. */
+function AttachedResume({
+  resume,
+  writing,
+}: {
+  resume: { id: string; label: string | null; fileName: string; mimeType: string | null; updatedAt: Date } | null;
+  writing: boolean;
+}) {
+  return (
+    <section className={card}>
+      <h2 className="mb-3 font-medium">Resume for this job</h2>
+      {resume ? (
+        <>
+          <Link
+            href={`/resumes/${resume.id}`}
+            className="-mx-2 flex items-center gap-3 rounded-md px-2 py-2 hover:bg-neutral-50 dark:hover:bg-neutral-800/60"
+          >
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300">
+              <FileText className="size-4" aria-hidden />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium">{resumeLabel(resume)}</span>
+              <span className="block truncate text-xs text-neutral-500">
+                {resume.mimeType === DOCX_MIME ? "Word" : resume.fileName.split(".").pop()?.toUpperCase()} · updated{" "}
+                {resume.updatedAt.toLocaleDateString()}
+              </span>
+            </span>
+          </Link>
+          {writing && <p className="mt-2 text-xs text-neutral-500">A new version is being written and will replace this one.</p>}
+          <div className="mt-3 flex gap-2">
+            <Link href={`/resumes/${resume.id}`} className={`${secondaryButton} flex flex-1 items-center justify-center gap-1.5`}>
+              <FilePen className="size-3.5" aria-hidden /> Review
+            </Link>
+            <DownloadMenu resumeId={resume.id} isDocx={resume.mimeType === DOCX_MIME} />
+          </div>
+        </>
+      ) : (
+        <p className="text-sm text-neutral-500">
+          {writing ? "Your tailored resume is being written. It shows up here when it's ready." : "No resume yet. Choose keywords to create one tailored to this job."}
+        </p>
+      )}
+    </section>
   );
 }
 
