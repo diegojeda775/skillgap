@@ -146,7 +146,7 @@ export default async function AnalysisPage({ params, searchParams }: PageProps<"
             {analysis.runs.map((run) => (
               <li key={run.id}>
                 {run.ok ? "✓" : "✗"} {providerLabel(run.provider)} ({run.model}) ·{" "}
-                {run.step.toLowerCase()} · {(run.latencyMs / 1000).toFixed(1)}s
+                {run.step.toLowerCase().replace("_", " ")} · {(run.latencyMs / 1000).toFixed(1)}s
                 {run.error && <span className="text-rose-600"> · {run.error}</span>}
               </li>
             ))}

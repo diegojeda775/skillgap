@@ -115,9 +115,9 @@ async function runAll<T>(providers: Provider[], fn: (p: Provider) => Promise<T |
   return results;
 }
 
-/** One structured AI call, logged as a ProviderRun on the analysis. Returns null if it fails. */
+/** One structured AI call, logged as a ProviderRun (on the analysis, if any). Returns null if it fails. */
 export async function callStructured<T>(
-  analysisId: string,
+  analysisId: string | null,
   provider: Provider,
   step: PipelineStep,
   schema: z.ZodType<T>,

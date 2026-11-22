@@ -83,7 +83,7 @@ export default async function ResumePage({ params, searchParams }: PageProps<"/r
               </button>
             </form>
           )}
-          {resume.file && <DownloadMenu resumeId={resume.id} isDocx={isDocx} />}
+          {resume.file && <DownloadMenu href={`/resumes/${resume.id}/download`} isDocx={isDocx} />}
           <form action={duplicateResume.bind(null, resume.id)}>
             <button className={`${secondaryButton} flex h-full items-center gap-1.5`}>
               <Copy className="size-3.5" aria-hidden /> Duplicate

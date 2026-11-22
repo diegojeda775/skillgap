@@ -62,7 +62,7 @@ export default async function ProfilePage() {
               <Link href={`/resumes/${master.id}`} className={`${secondaryButton} flex items-center gap-1.5`}>
                 <FilePen className="size-3.5" aria-hidden /> Edit skills
               </Link>
-              <DownloadMenu resumeId={master.id} isDocx={master.mimeType === DOCX_MIME} />
+              <DownloadMenu href={`/resumes/${master.id}/download`} isDocx={master.mimeType === DOCX_MIME} />
             </div>
           </div>
 

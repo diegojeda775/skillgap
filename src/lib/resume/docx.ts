@@ -5,7 +5,7 @@ import { isHeadingLike, OTHER_HEADING, SKILLS_HEADING } from "./skills";
 // Edits the Skills section of a .docx in place. Only the text inside existing runs changes,
 // so fonts, bold labels, bullets, spacing and layout stay exactly as the user designed them.
 
-const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+export const W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const XML = "http://www.w3.org/XML/1998/namespace";
 const DOCUMENT_PATH = "word/document.xml";
 const MAX_SECTION_LINES = 15;
@@ -15,7 +15,7 @@ interface Piece {
   text: string; // "\n" for a line break, "\t" for a tab
 }
 
-interface Paragraph {
+export interface Paragraph {
   el: Element;
   pieces: Piece[];
   text: string;
@@ -59,9 +59,7 @@ export async function writeSkillsSection(docx: Buffer, newLines: string[]): Prom
     for (const extra of section.slice(newLines.length)) extra.el.parentNode?.removeChild(extra.el);
   }
 
-  const xml = new XMLSerializer().serializeToString(doc);
-  zip.file(DOCUMENT_PATH, xml.startsWith("<?xml") ? xml : declaration + xml);
-  return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+  return save({ zip, doc, declaration });
 }
 
 export interface DocParagraph {
@@ -127,16 +125,14 @@ export async function applyParagraphEdits(docx: Buffer, edits: ParagraphEdits): 
     if (editable(id)) all[id].el.parentNode?.removeChild(all[id].el);
   }
 
-  const xml = new XMLSerializer().serializeToString(doc);
-  zip.file(DOCUMENT_PATH, xml.startsWith("<?xml") ? xml : declaration + xml);
-  return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+  return save({ zip, doc, declaration });
 }
 
 const DATE_RANGE =
   /\b(?:19|20)\d{2}\s*(?:-|–|—|to)\s*(?:(?:19|20)\d{2}|present|current|now)\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s+(?:19|20)\d{2}\b/i;
-const CONTACT = /@|https?:\/\/|linkedin|github\.com|\+?\d[\d\s().-]{7,}\d/i;
+export const CONTACT = /@|https?:\/\/|linkedin|github\.com|\+?\d[\d\s().-]{7,}\d/i;
 
-function classify(all: Paragraph[]): DocParagraph[] {
+export function classify(all: Paragraph[]): DocParagraph[] {
   const flat = (p: Paragraph) => p.text.replace(/\s+/g, " ").trim();
   const isHeading = (p: Paragraph) => {
     const t = flat(p);
@@ -228,7 +224,7 @@ function splitHeadline(text: string): { keep: string; title: string } | null {
   return { keep: match[1], title: match[2] };
 }
 
-function setHeadline(all: Paragraph[], info: DocParagraph[], title: string) {
+export function setHeadline(all: Paragraph[], info: DocParagraph[], title: string) {
   const id = info.findIndex((p) => p.headline);
   if (id === -1) return;
   const paragraph = all[id];
@@ -245,11 +241,11 @@ function isRoleHeader(p: Paragraph, t: string) {
   return first !== undefined && isBoldRun(first) && !/^[^:]{1,40}:/.test(t);
 }
 
-function isBullet(p: Paragraph, t: string) {
+export function isBullet(p: Paragraph, t: string) {
   return p.el.getElementsByTagNameNS(W, "numPr").length > 0 || /^[•\-–▪●◦*]\s/.test(t);
 }
 
-function hasHeadingStyle(p: Element) {
+export function hasHeadingStyle(p: Element) {
   const styles = p.getElementsByTagNameNS(W, "pStyle");
   return styles.length > 0 && /heading|title/i.test(styles[0].getAttributeNS(W, "val") ?? "");
 }
@@ -267,7 +263,7 @@ function isBoldRun(piece: Piece) {
   return bold !== undefined && val !== "0" && val !== "false";
 }
 
-async function load(docx: Buffer) {
+export async function load(docx: Buffer) {
   const zip = await JSZip.loadAsync(docx);
   const file = zip.file(DOCUMENT_PATH);
   if (!file) throw new Error("Not a Word document");
@@ -277,8 +273,14 @@ async function load(docx: Buffer) {
   return { zip, doc, declaration };
 }
 
+export async function save({ zip, doc, declaration }: Awaited<ReturnType<typeof load>>): Promise<Buffer> {
+  const xml = new XMLSerializer().serializeToString(doc);
+  zip.file(DOCUMENT_PATH, xml.startsWith("<?xml") ? xml : declaration + xml);
+  return zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+}
+
 /** Body paragraphs in reading order, skipping the duplicate copies Word keeps for older readers. */
-function paragraphs(doc: Document): Paragraph[] {
+export function paragraphs(doc: Document): Paragraph[] {
   const result: Paragraph[] = [];
   const all = doc.getElementsByTagNameNS(W, "p");
   for (let i = 0; i < all.length; i++) {
@@ -418,7 +420,7 @@ function insertAt(paragraphEl: Element, pieces: Piece[], position: number, text:
 }
 
 /** w:t / w:br / w:tab elements for a string that may contain line breaks and tabs. */
-function textNodes(doc: Document, text: string): Element[] {
+export function textNodes(doc: Document, text: string): Element[] {
   const nodes: Element[] = [];
   for (const part of text.split(/(\n|\t)/)) {
     if (!part) continue;
@@ -471,7 +473,7 @@ function appendParagraphs(doc: Document, all: Paragraph[], lines: string[]) {
   }
 }
 
-function childElements(el: Element): Element[] {
+export function childElements(el: Element): Element[] {
   const out: Element[] = [];
   for (let c = el.firstChild; c; c = c.nextSibling) if (c.nodeType === 1) out.push(c as Element);
   return out;

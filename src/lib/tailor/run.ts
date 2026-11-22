@@ -7,6 +7,7 @@ import { DOCX_MIME, resumeText } from "@/lib/ingest/resume";
 import { applyParagraphEdits, listParagraphs } from "@/lib/resume/docx";
 import { docxToPdf, pdfPageCount } from "@/lib/resume/pdf";
 import { parseSkillsFromText } from "@/lib/resume/skills";
+import { headlineTitle } from "./headline";
 import { keywordItems, keywordMatch, weightedPercent } from "./keywords";
 import { sanitizeEdits, WRITER_SYSTEM, type WriterOutput, writerPrompt, writerSchema } from "./writer";
 
@@ -186,15 +187,4 @@ async function countPages(docx: Buffer): Promise<number | null> {
     console.warn("Couldn't count the tailored resume's pages", error);
     return null;
   }
-}
-
-/** "IT Support Technician II (Remote) - Hybrid" → "IT Support Technician II". */
-export function headlineTitle(title: string) {
-  return (
-    title
-      .replace(/\s*[([][^)\]]*[)\]]/g, "")
-      .replace(/\s+[-–—|,/]\s*(?:remote|hybrid|on-?site|in-?office|contract|full[- ]time|part[- ]time)\b.*$/i, "")
-      .replace(/\s+/g, " ")
-      .trim() || title.trim()
-  );
 }

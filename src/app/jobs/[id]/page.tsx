@@ -1,10 +1,11 @@
-import { AlertTriangle, ArrowLeft, CalendarClock, Check, ExternalLink, FilePen, FileText, FileUp, Loader2, MapPin, RefreshCw, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CalendarClock, Check, ExternalLink, FilePen, FileText, FileUp, Loader2, Mail, MapPin, RefreshCw, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { completeNextAction, deleteJob } from "@/app/jobs/actions";
 import { AutoRefresh } from "@/components/AutoRefresh";
 import { ConfirmButton } from "@/components/ConfirmButton";
+import { CoverLetterPanel, type PanelLetter } from "@/components/cover-letters/CoverLetterPanel";
 import { CompanyAvatar } from "@/components/jobs/JobCard";
 import { AnalyzeJobButton, JobDetailsForm, OutcomeSelect, StageSelect } from "@/components/jobs/JobForms";
 import { DownloadMenu } from "@/components/resumes/DownloadMenu";
@@ -13,6 +14,9 @@ import { MatchMeter } from "@/components/tailor/MatchMeter";
 import { card, deleteIconButton, primaryButton, secondaryButton } from "@/components/ui";
 import type { AnalysisItem } from "@/generated/prisma/client";
 import { requireUser } from "@/lib/auth";
+import { unsupportedMentions } from "@/lib/cover-letter/claims";
+import { letterBackground } from "@/lib/cover-letter/run";
+import { letterStatus } from "@/lib/cover-letter/status";
 import { db } from "@/lib/db";
 import { DOCX_MIME } from "@/lib/ingest/resume";
 import { dueState, formatDueDate, toDateInput } from "@/lib/jobs/dates";
@@ -32,9 +36,16 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
     db.job.findFirst({ where: { id, userId: user.id }, include: {
         events: { orderBy: { createdAt: "desc" } },
         resume: { select: { id: true, label: true, fileName: true, mimeType: true, updatedAt: true } },
+        coverLetters: {
+          orderBy: { createdAt: "desc" },
+          include: { resume: { select: { label: true, fileName: true, text: true } } },
+        },
       },
     }),
-    db.resume.findFirst({ where: { userId: user.id, isMaster: true }, select: { id: true, text: true, updatedAt: true } }),
+    db.resume.findFirst({
+      where: { userId: user.id, isMaster: true },
+      select: { id: true, label: true, fileName: true, text: true, notes: true, updatedAt: true },
+    }),
   ]);
   if (!job) notFound();
 
@@ -53,10 +64,30 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
       ])
     : [null, null];
 
+  const letters: PanelLetter[] = job.coverLetters.map((l) => ({
+    id: l.id,
+    body: l.body,
+    status: letterStatus(l),
+    error: l.error,
+    createdAt: l.createdAt,
+    resumeName: l.resume && resumeLabel(l.resume),
+  }));
+  const currentLetter = job.coverLetters.find((l) => l.status === "COMPLETE");
+  const unsupported = currentLetter
+    ? unsupportedMentions(
+        currentLetter.body,
+        letterBackground(currentLetter.resume, master, currentLetter.instructions),
+        job.description,
+        // Graders found these in the resume, in other words.
+        (analysis?.items ?? []).filter((i) => i.status !== "MATCHED"),
+      )
+    : [];
+  const letterSource = job.resume ?? master;
+
   const due = job.nextActionAt && job.stage !== "CLOSED" ? dueState(job.nextActionAt.toISOString()) : null;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-24">
       <Link href="/jobs" className="inline-flex items-center gap-1 text-sm text-neutral-500 hover:text-neutral-900 dark:hover:text-white">
         <ArrowLeft className="size-4" aria-hidden /> Board
       </Link>
@@ -108,6 +139,13 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
             adLength={job.description.length}
           />
 
+          <CoverLetterPanel
+            jobId={job.id}
+            letters={letters}
+            writesFrom={letterSource && resumeLabel(letterSource)}
+            unsupported={unsupported}
+          />
+
           <section className={card}>
             <details>
               <summary className="cursor-pointer font-medium">Saved job ad</summary>
@@ -123,6 +161,17 @@ export default async function JobPage({ params, searchParams }: PageProps<"/jobs
             resume={job.resume}
             writing={!!run && run.status !== "COMPLETE" && run.status !== "FAILED"}
           />
+
+          {currentLetter && (
+            <section className={`${card} flex items-center justify-between gap-3`}>
+              <a href="#cover-letter" className="min-w-0 hover:underline">
+                <span className="flex items-center gap-2 font-medium">
+                  <Mail className="size-4 shrink-0 text-neutral-500" aria-hidden /> Cover letter
+                </span>
+              </a>
+              <DownloadMenu href={`/cover-letters/${currentLetter.id}/download`} isDocx />
+            </section>
+          )}
 
           {job.nextAction && (
             <section
@@ -263,7 +312,7 @@ function ResumeWorkflow({ jobId, master, analysis, run, editing, adLength }: Wor
             <Link href={`/resumes/${run.result.id}`} className={`${secondaryButton} flex items-center gap-1.5`}>
               <FilePen className="size-3.5" aria-hidden /> Review
             </Link>
-            <DownloadMenu resumeId={run.result.id} isDocx />
+            <DownloadMenu href={`/resumes/${run.result.id}/download`} isDocx />
           </div>
         </div>
         {added.length > 0 && (
@@ -410,7 +459,7 @@ function AttachedResume({
             <Link href={`/resumes/${resume.id}`} className={`${secondaryButton} flex flex-1 items-center justify-center gap-1.5`}>
               <FilePen className="size-3.5" aria-hidden /> Review
             </Link>
-            <DownloadMenu resumeId={resume.id} isDocx={resume.mimeType === DOCX_MIME} />
+            <DownloadMenu href={`/resumes/${resume.id}/download`} isDocx={resume.mimeType === DOCX_MIME} />
           </div>
         </>
       ) : (

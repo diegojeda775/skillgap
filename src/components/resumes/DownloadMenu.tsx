@@ -11,8 +11,8 @@ interface Format {
   icon: typeof FileText;
 }
 
-/** "Download" button; with more than one format it opens a menu to pick PDF or Word. */
-export function DownloadMenu({ resumeId, isDocx }: { resumeId: string; isDocx: boolean }) {
+/** "Download" button for a download route; with more than one format it opens a menu to pick PDF or Word. */
+export function DownloadMenu({ href, isDocx }: { href: string; isDocx: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -29,18 +29,17 @@ export function DownloadMenu({ resumeId, isDocx }: { resumeId: string; isDocx: b
     };
   }, [open]);
 
-  const base = `/resumes/${resumeId}/download`;
   if (!isDocx) {
     return (
-      <a href={base} className={`${primaryButton} flex items-center gap-1.5`}>
+      <a href={href} className={`${primaryButton} flex items-center gap-1.5`}>
         <Download className="size-4" aria-hidden /> Download
       </a>
     );
   }
 
   const formats: Format[] = [
-    { label: "PDF", hint: "Best for applying", href: `${base}?format=pdf`, icon: FileText },
-    { label: "Word (.docx)", hint: "To keep editing", href: base, icon: FileType },
+    { label: "PDF", hint: "Best for applying", href: `${href}?format=pdf`, icon: FileText },
+    { label: "Word (.docx)", hint: "To keep editing", href, icon: FileType },
   ];
 
   return (

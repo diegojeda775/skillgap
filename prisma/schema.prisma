@@ -14,40 +14,42 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  resumes    Resume[]
-  analyses   Analysis[]
-  jobs       Job[]
-  tailorRuns TailorRun[]
+  resumes      Resume[]
+  analyses     Analysis[]
+  jobs         Job[]
+  tailorRuns   TailorRun[]
+  coverLetters CoverLetter[]
 }
 
 /// One resume version, e.g. "Frontend" or "IT Support". `skills` is the editable
 /// skills section; keywords from an analysis can be added to it.
 model Resume {
-  id        String   @id @default(cuid())
-  userId    String
-  label     String?
-  fileName  String
-  text      String   @db.Text
-  skills    String[] @default([])
+  id             String   @id @default(cuid())
+  userId         String
+  label          String?
+  fileName       String
+  text           String   @db.Text
+  skills         String[] @default([])
   /// The uploaded file. DOCX files are edited in place so their formatting is kept.
-  file      Bytes?
-  mimeType  String?
+  file           Bytes?
+  mimeType       String?
   /// The cumulative resume: everything the user has done. Tailored versions are cut from it.
-  isMaster  Boolean  @default(false)
+  isMaster       Boolean  @default(false)
   /// Extra facts for the master that aren't in the file (projects, tools, achievements).
-  notes     String   @default("") @db.Text
+  notes          String   @default("") @db.Text
   /// For tailored versions: the master they were made from.
   sourceResumeId String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @default(now()) @updatedAt
 
-  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  source     Resume?     @relation("TailoredFrom", fields: [sourceResumeId], references: [id], onDelete: SetNull)
-  tailored   Resume[]    @relation("TailoredFrom")
-  analyses   Analysis[]
-  jobs       Job[]
-  masterRuns TailorRun[] @relation("TailorMaster")
-  resultRuns TailorRun[] @relation("TailorResult")
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source       Resume?       @relation("TailoredFrom", fields: [sourceResumeId], references: [id], onDelete: SetNull)
+  tailored     Resume[]      @relation("TailoredFrom")
+  analyses     Analysis[]
+  jobs         Job[]
+  masterRuns   TailorRun[]   @relation("TailorMaster")
+  resultRuns   TailorRun[]   @relation("TailorResult")
+  coverLetters CoverLetter[]
 
   @@index([userId, createdAt])
 }
@@ -134,12 +136,14 @@ enum PipelineStep {
   EXTRACT
   COMPARE
   WRITE
+  COVER_LETTER
 }
 
 /// One AI call, kept for debugging, cost tracking and provider quality comparison.
 model ProviderRun {
   id           String       @id @default(cuid())
-  analysisId   String
+  /// Null for calls made outside an analysis, such as a cover letter for a job that wasn't analyzed.
+  analysisId   String?
   provider     String
   model        String
   step         PipelineStep
@@ -150,7 +154,7 @@ model ProviderRun {
   error        String?
   createdAt    DateTime     @default(now())
 
-  analysis Analysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  analysis Analysis? @relation(fields: [analysisId], references: [id], onDelete: Cascade)
 
   @@index([analysisId])
 }
@@ -198,11 +202,12 @@ model Job {
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
-  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  resume     Resume?     @relation(fields: [resumeId], references: [id], onDelete: SetNull)
-  analyses   Analysis[]
-  events     JobEvent[]
-  tailorRuns TailorRun[]
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resume       Resume?       @relation(fields: [resumeId], references: [id], onDelete: SetNull)
+  analyses     Analysis[]
+  events       JobEvent[]
+  tailorRuns   TailorRun[]
+  coverLetters CoverLetter[]
 
   @@index([userId, stage, position])
 }
@@ -270,4 +275,37 @@ model TailorRun {
 
   @@index([userId, createdAt])
   @@index([jobId])
+}
+
+// --- Cover letters ---
+
+enum CoverLetterStatus {
+  WRITING
+  COMPLETE
+  FAILED
+}
+
+/// One version of a job's cover letter. The newest complete one is current; older ones are kept.
+/// Word and PDF files are made from `body` on download, under the resume's own letterhead.
+model CoverLetter {
+  id           String            @id @default(cuid())
+  userId       String
+  jobId        String
+  /// The resume it was written from; its name and contact lines become the letterhead.
+  resumeId     String?
+  /// The letter as text, paragraphs separated by blank lines. Editable by the user.
+  body         String            @default("") @db.Text
+  /// What the user asked the AI to mention or emphasize.
+  instructions String            @default("") @db.Text
+  status       CoverLetterStatus @default(WRITING)
+  error        String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job    Job     @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  resume Resume? @relation(fields: [resumeId], references: [id], onDelete: SetNull)
+
+  @@index([jobId, createdAt])
+  @@index([userId, createdAt])
 }

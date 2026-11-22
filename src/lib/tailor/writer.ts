@@ -127,9 +127,9 @@ export function sanitizeEdits(output: WriterOutput, paragraphs: DocParagraph[], 
   const editable = (id: number) => byId.has(id) && !byId.get(id)!.locked;
   const haystack = squash(sourceText);
 
-  // Roles: always keep at least MIN_ROLES, restoring the most recent (first listed) ones.
+  // Roles: always keep the first listed (most recent) one, and at least MIN_ROLES in all.
   const roles = [...new Set(paragraphs.flatMap((p) => (p.entry === null ? [] : [p.entry])))];
-  const removeEntries = [...new Set(output.removeRoles.filter((id) => roles.includes(id)))];
+  const removeEntries = [...new Set(output.removeRoles.filter((id) => roles.includes(id) && id !== roles[0]))];
   for (const role of roles) {
     if (roles.length - removeEntries.length >= Math.min(MIN_ROLES, roles.length)) break;
     if (removeEntries.includes(role)) removeEntries.splice(removeEntries.indexOf(role), 1);
