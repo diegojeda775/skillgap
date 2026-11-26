@@ -46,7 +46,7 @@ export async function runTailor(runId: string) {
 
     // Claude writes first; if it fails (outage, bad key) the next provider takes over.
     const writers = getProviders().sort((a, b) => Number(b.id === "claude") - Number(a.id === "claude"));
-    if (writers.length === 0) throw new Error("No AI provider is configured. Add at least one API key.");
+    if (writers.length === 0) throw new Error("No AI provider is configured. Add an API key or CLAUDE_CODE_OAUTH_TOKEN to .env.");
 
     const analysis = await db.analysis.findUniqueOrThrow({ where: { id: run.baselineAnalysisId }, include: { items: true } });
     const items = keywordItems(analysis.items);

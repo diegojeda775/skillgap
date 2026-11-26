@@ -5,10 +5,13 @@ import { db } from "@/lib/db";
 import { resumeForAnalysis } from "@/lib/resume/skills";
 import { type MergedRequirement, mergeRequirements, resolveStatuses } from "./merge";
 import { COMPARE_SYSTEM, comparePrompt, EXTRACT_SYSTEM, extractPrompt } from "./prompts";
+import { claudeCli } from "./claude-cli";
 import { getProviders, type Provider } from "./providers";
 import { comparisonSchema, extractionSchema } from "./schemas";
 
 const CALL_TIMEOUT_MS = 180_000;
+// The CLI has no built-in retries here and starts a process per call; give it longer.
+const CLI_TIMEOUT_MS = 300_000;
 // Results are a few thousand tokens; without a cap the SDK requests each model's maximum.
 const MAX_OUTPUT_TOKENS = 16_000;
 
@@ -30,7 +33,7 @@ export async function runAnalysis(analysisId: string) {
     });
 
     const providers = getProviders();
-    if (providers.length === 0) throw new Error("No AI provider is configured. Add at least one API key.");
+    if (providers.length === 0) throw new Error("No AI provider is configured. Add an API key or CLAUDE_CODE_OAUTH_TOKEN to .env.");
 
     await db.analysis.update({ where: { id: analysisId }, data: { status: "EXTRACTING", error: null } });
 
@@ -128,23 +131,25 @@ export async function callStructured<T>(
   const run = { analysisId, provider: provider.id, model: provider.modelId, step };
 
   try {
-    const { output, usage } = await generateText({
-      model: provider.model,
-      output: Output.object({ schema }),
-      system,
-      prompt,
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
-      maxRetries: 2,
-      abortSignal: AbortSignal.timeout(CALL_TIMEOUT_MS),
-    });
+    const { output, inputTokens, outputTokens } = provider.model
+      ? await generateText({
+          model: provider.model,
+          output: Output.object({ schema }),
+          system,
+          prompt,
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          maxRetries: 2,
+          abortSignal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+        }).then((r) => ({ output: r.output, inputTokens: r.usage.inputTokens, outputTokens: r.usage.outputTokens }))
+      : await claudeCli(schema, system, prompt, provider.modelId, AbortSignal.timeout(CLI_TIMEOUT_MS));
 
     await db.providerRun.create({
       data: {
         ...run,
         ok: true,
         latencyMs: Date.now() - startedAt,
-        inputTokens: usage.inputTokens ?? null,
-        outputTokens: usage.outputTokens ?? null,
+        inputTokens: inputTokens ?? null,
+        outputTokens: outputTokens ?? null,
       },
     });
     return output;

@@ -8,7 +8,8 @@ export interface Provider {
   id: ProviderId;
   label: string;
   modelId: string;
-  model: LanguageModel;
+  /** An AI SDK model, or null when calls go through the Claude Code CLI (Claude subscription). */
+  model: LanguageModel | null;
 }
 
 /** Every provider with an API key set. Order matters: it breaks ties when merging. */
@@ -18,6 +19,10 @@ export function getProviders(): Provider[] {
   if (process.env.ANTHROPIC_API_KEY) {
     const modelId = process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5";
     providers.push({ id: "claude", label: PROVIDER_LABELS.claude, modelId, model: createAnthropic()(modelId) });
+  } else if (process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+    // Claude subscription through the Claude Code CLI; meant for a single user's own use.
+    const modelId = process.env.CLAUDE_CODE_MODEL || "sonnet";
+    providers.push({ id: "claude", label: PROVIDER_LABELS.claude, modelId, model: null });
   }
   if (process.env.OPENAI_API_KEY) {
     const modelId = process.env.OPENAI_MODEL || "gpt-5.5";

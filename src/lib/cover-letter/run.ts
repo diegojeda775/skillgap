@@ -21,7 +21,7 @@ export async function runCoverLetter(letterId: string) {
 
     // Claude writes first; if it fails (outage, bad key) the next provider takes over.
     const writers = getProviders().sort((a, b) => Number(b.id === "claude") - Number(a.id === "claude"));
-    if (writers.length === 0) throw new Error("No AI provider is configured. Add at least one API key.");
+    if (writers.length === 0) throw new Error("No AI provider is configured. Add an API key or CLAUDE_CODE_OAUTH_TOKEN to .env.");
 
     const [master, analysis] = await Promise.all([
       db.resume.findFirst({ where: { userId: letter.userId, isMaster: true } }),
@@ -64,7 +64,7 @@ export async function runCoverLetter(letterId: string) {
       if (!best || flagged.length < best.flagged.length) best = { body, flagged };
       if (best.flagged.length === 0) break;
     }
-    if (!best) throw new Error("The AI services didn't return a letter. Check the API keys in .env, or try again in a moment.");
+    if (!best) throw new Error("The AI services didn't return a letter. Check the AI keys in .env, or try again in a moment.");
 
     await db.coverLetter.updateMany({ where: { id: letterId }, data: { status: "COMPLETE", error: null, body: best.body } });
   } catch (error) {
